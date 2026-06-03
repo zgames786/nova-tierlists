@@ -1,0 +1,732 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Press+Start+2P&display=swap');
+
+/* ── Scene ───────────────────────────────────────────── */
+
+.nova-app {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100dvh;
+  width: 100%;
+  overflow-x: hidden;
+  font-family: 'Outfit', system-ui, sans-serif;
+  color: #ede9fe;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(1rem, 4vw, 2rem);
+  box-sizing: border-box;
+}
+
+.nova-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 100% 70% at 50% 25%, rgba(124, 58, 237, 0.28), transparent 55%),
+    radial-gradient(ellipse 80% 50% at 50% 50%, rgba(88, 28, 135, 0.2), transparent 50%),
+    linear-gradient(180deg, #140820 0%, #0a0414 40%, #030106 100%);
+  pointer-events: none;
+}
+
+/* Purple halo bleeding into dark / black areas */
+.nova-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 55% 45% at 0% 100%, rgba(124, 58, 237, 0.22), transparent 70%),
+    radial-gradient(ellipse 55% 45% at 100% 100%, rgba(124, 58, 237, 0.22), transparent 70%),
+    radial-gradient(ellipse 50% 40% at 0% 0%, rgba(139, 92, 246, 0.14), transparent 68%),
+    radial-gradient(ellipse 50% 40% at 100% 0%, rgba(139, 92, 246, 0.14), transparent 68%),
+    radial-gradient(ellipse 100% 55% at 50% 100%, rgba(109, 40, 217, 0.18), transparent 58%),
+    radial-gradient(ellipse 90% 70% at 50% 50%, transparent 35%, rgba(88, 28, 135, 0.08) 100%);
+  box-shadow:
+    inset 0 0 80px 24px rgba(124, 58, 237, 0.1),
+    inset 0 0 160px 48px rgba(88, 28, 135, 0.06);
+  pointer-events: none;
+}
+
+.nova-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 90% 35% at 50% 100%, rgba(139, 92, 246, 0.14), transparent 65%);
+}
+
+/* ── Stars ───────────────────────────────────────────── */
+
+.stars {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.stars-1 {
+  background-image:
+    radial-gradient(1px 1px at 12% 18%, rgba(255, 255, 255, 0.65), transparent),
+    radial-gradient(1px 1px at 28% 42%, rgba(255, 255, 255, 0.45), transparent),
+    radial-gradient(1.5px 1.5px at 45% 12%, rgba(196, 181, 253, 0.7), transparent),
+    radial-gradient(1px 1px at 62% 68%, rgba(255, 255, 255, 0.4), transparent),
+    radial-gradient(1px 1px at 78% 30%, rgba(255, 255, 255, 0.55), transparent),
+    radial-gradient(1px 1px at 90% 75%, rgba(167, 139, 250, 0.45), transparent);
+  animation: twinkle 7s ease-in-out infinite alternate;
+}
+
+.stars-2 {
+  opacity: 0.75;
+  background-image:
+    radial-gradient(1px 1px at 8% 55%, rgba(255, 255, 255, 0.35), transparent),
+    radial-gradient(1px 1px at 35% 78%, rgba(255, 255, 255, 0.3), transparent),
+    radial-gradient(1.5px 1.5px at 55% 38%, rgba(139, 92, 246, 0.5), transparent),
+    radial-gradient(1px 1px at 72% 8%, rgba(255, 255, 255, 0.4), transparent),
+    radial-gradient(1px 1px at 88% 48%, rgba(216, 180, 254, 0.4), transparent);
+  animation: star-drift 100s linear infinite, twinkle 9s ease-in-out 1s infinite alternate;
+}
+
+.stars-3 {
+  opacity: 0.5;
+  background-size: 220px 220px;
+  background-image:
+    radial-gradient(1px 1px at 20% 10%, rgba(255, 255, 255, 0.25), transparent),
+    radial-gradient(1px 1px at 70% 60%, rgba(255, 255, 255, 0.3), transparent);
+  animation: star-drift 70s linear infinite reverse;
+}
+
+@keyframes twinkle {
+  0% { opacity: 0.45; }
+  100% { opacity: 1; }
+}
+
+@keyframes star-drift {
+  to { transform: translateY(-100px); }
+}
+
+/* ── Main layout ─────────────────────────────────────── */
+
+.nova-content {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(1rem, 2.5vw, 1.75rem);
+}
+
+/* ── Hero + singularity (black hole) ─────────────────── */
+
+.hero-logo {
+  position: relative;
+  width: 100%;
+  text-align: center;
+  padding: clamp(2rem, 6vw, 3.5rem) 0.5rem 1.25rem;
+}
+
+.singularity {
+  position: absolute;
+  left: 50%;
+  top: 48%;
+  width: min(480px, 95vw);
+  height: min(480px, 95vw);
+  transform: translate(-50%, -50%);
+  z-index: 0;
+  pointer-events: none;
+}
+
+.singularity__halo {
+  position: absolute;
+  inset: -15%;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(139, 92, 246, 0.35) 0%,
+    rgba(124, 58, 237, 0.15) 35%,
+    transparent 65%
+  );
+  filter: blur(40px);
+  animation: halo-breathe 6s ease-in-out infinite;
+}
+
+.singularity__lens {
+  position: absolute;
+  inset: 8%;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow:
+    inset 0 0 60px rgba(167, 139, 250, 0.25),
+    inset 0 0 120px rgba(88, 28, 135, 0.15);
+  border: 1px solid rgba(196, 181, 253, 0.08);
+  animation: lens-distort 10s ease-in-out infinite;
+}
+
+.singularity__lens::before {
+  content: '';
+  position: absolute;
+  inset: -12%;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    transparent 38%,
+    rgba(167, 139, 250, 0.12) 42%,
+    rgba(124, 58, 237, 0.08) 46%,
+    transparent 52%
+  );
+  animation: lens-ring 10s ease-in-out infinite reverse;
+}
+
+.singularity__glow {
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(192, 38, 211, 0.25) 0%,
+    rgba(124, 58, 237, 0.2) 40%,
+    transparent 70%
+  );
+  filter: blur(20px);
+  animation: halo-breathe 5s ease-in-out 0.5s infinite;
+}
+
+.singularity__accretion {
+  position: absolute;
+  inset: 22%;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(216, 180, 254, 0.85) 40deg,
+    rgba(167, 139, 250, 0.95) 90deg,
+    rgba(192, 38, 211, 0.8) 140deg,
+    rgba(124, 58, 237, 0.9) 200deg,
+    rgba(139, 92, 246, 0.85) 260deg,
+    rgba(216, 180, 254, 0.7) 310deg,
+    transparent 360deg
+  );
+  filter: blur(4px);
+  animation: accretion-spin 14s linear infinite;
+  opacity: 0.9;
+}
+
+.singularity__accretion--inner {
+  inset: 28%;
+  filter: blur(2px);
+  opacity: 0.65;
+  animation-duration: 9s;
+  animation-direction: reverse;
+}
+
+.singularity__core {
+  position: absolute;
+  inset: 36%;
+  border-radius: 50%;
+  background: radial-gradient(circle, #000 0%, #050208 45%, #0f0618 100%);
+  box-shadow:
+    0 0 40px rgba(124, 58, 237, 0.35),
+    0 0 80px rgba(139, 92, 246, 0.15),
+    0 0 60px rgba(0, 0, 0, 1),
+    inset 0 0 40px rgba(88, 28, 135, 0.4);
+}
+
+/* ── Light streaks (gravitational pull) ───────────────── */
+
+.singularity__streaks {
+  position: absolute;
+  inset: 0;
+}
+
+.singularity__streak {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2px;
+  height: clamp(70px, 18vw, 110px);
+  margin-left: -1px;
+  margin-top: calc(clamp(70px, 18vw, 110px) * -0.5);
+  transform-origin: center bottom;
+  transform: rotate(var(--angle)) translateY(calc(-1 * min(200px, 42vw)));
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.7) 0%,
+    rgba(216, 180, 254, 0.45) 35%,
+    rgba(139, 92, 246, 0.2) 70%,
+    transparent 100%
+  );
+  border-radius: 2px;
+  opacity: 0.35;
+  animation: light-pull 7s ease-in-out infinite;
+  animation-delay: var(--delay, 0s);
+}
+
+.singularity__streak--bend {
+  width: 3px;
+  height: clamp(85px, 20vw, 130px);
+  margin-top: calc(clamp(85px, 20vw, 130px) * -0.5);
+  border-radius: 50% 50% 2px 2px;
+  filter: blur(0.4px);
+  opacity: 0.28;
+  animation-name: light-pull-bend;
+}
+
+@keyframes halo-breathe {
+  0%,
+  100% {
+    opacity: 0.75;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
+@keyframes lens-distort {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: blur(0);
+  }
+  50% {
+    transform: scale(1.03);
+  }
+}
+
+@keyframes lens-ring {
+  0%,
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.06) rotate(8deg);
+    opacity: 1;
+  }
+}
+
+@keyframes accretion-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes light-pull {
+  0%,
+  100% {
+    opacity: 0.2;
+    transform: rotate(var(--angle)) translateY(calc(-1 * min(200px, 42vw))) scaleY(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: rotate(var(--angle)) translateY(calc(-1 * min(185px, 39vw))) scaleY(1.08);
+  }
+}
+
+@keyframes light-pull-bend {
+  0%,
+  100% {
+    opacity: 0.15;
+    transform: rotate(var(--angle)) translateY(calc(-1 * min(200px, 42vw))) scaleY(1) skewX(0deg);
+  }
+  35% {
+    opacity: 0.4;
+    transform: rotate(calc(var(--angle) + 4deg)) translateY(calc(-1 * min(188px, 40vw)))
+      scaleY(1.15) skewX(-6deg);
+  }
+  65% {
+    opacity: 0.35;
+    transform: rotate(calc(var(--angle) - 3deg)) translateY(calc(-1 * min(192px, 41vw)))
+      scaleY(1.1) skewX(5deg);
+  }
+}
+
+/* ── Minecraft-style title ───────────────────────────── */
+
+.hero-logo__title {
+  position: relative;
+  z-index: 2;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  animation: title-float 7s ease-in-out infinite;
+}
+
+@keyframes title-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.mc-title {
+  position: relative;
+  display: inline-block;
+  font-family: 'Press Start 2P', monospace;
+  font-size: clamp(1.65rem, 7.5vw, 3.75rem);
+  line-height: 1.35;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  padding: 0.15em 0.1em;
+}
+
+.mc-title__layer,
+.mc-title__face {
+  display: block;
+  white-space: nowrap;
+}
+
+.mc-title__layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  user-select: none;
+  pointer-events: none;
+}
+
+.mc-title__layer--4 {
+  color: #0a0418;
+  transform: translate(6px, 8px);
+  text-shadow: none;
+}
+
+.mc-title__layer--3 {
+  color: #1a0a32;
+  transform: translate(4px, 6px);
+}
+
+.mc-title__layer--2 {
+  color: #2e1065;
+  transform: translate(2px, 4px);
+  text-shadow: 0 0 20px rgba(88, 28, 135, 0.8);
+}
+
+.mc-title__layer--1 {
+  color: #4c1d95;
+  transform: translate(1px, 2px);
+  text-shadow: 0 0 30px rgba(124, 58, 237, 0.6);
+}
+
+.mc-title__face {
+  position: relative;
+  background: linear-gradient(
+    180deg,
+    #ffffff 0%,
+    #f5f0ff 8%,
+    #e9d5ff 18%,
+    #c4b5fd 35%,
+    #a78bfa 52%,
+    #8b5cf6 68%,
+    #7c3aed 82%,
+    #6d28d9 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: 1px rgba(255, 255, 255, 0.15);
+  paint-order: stroke fill;
+  filter: drop-shadow(0 0 24px rgba(167, 139, 250, 0.9))
+    drop-shadow(0 0 48px rgba(139, 92, 246, 0.6))
+    drop-shadow(0 0 80px rgba(124, 58, 237, 0.35));
+}
+
+.mc-title__face::before {
+  content: '';
+  position: absolute;
+  inset: -8% -4%;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.35) 0%,
+    transparent 28%,
+    transparent 72%,
+    rgba(46, 16, 101, 0.25) 100%
+  );
+  pointer-events: none;
+  mix-blend-mode: overlay;
+}
+
+.mc-title__face::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 42%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), transparent);
+  pointer-events: none;
+}
+
+/* ── Tierlists subtitle ──────────────────────────────── */
+
+.tierlists-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(0.75rem, 3vw, 1.25rem);
+  width: 100%;
+  max-width: 420px;
+}
+
+.tierlists-divider {
+  flex: 1;
+  height: 1px;
+  max-width: 100px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(196, 181, 253, 0.25) 15%,
+    rgba(216, 180, 254, 0.95) 50%,
+    rgba(196, 181, 253, 0.25) 85%,
+    transparent
+  );
+  box-shadow:
+    0 0 12px rgba(167, 139, 250, 0.7),
+    0 0 24px rgba(124, 58, 237, 0.35);
+}
+
+.tierlists-label {
+  font-family: 'Outfit', sans-serif;
+  font-size: clamp(0.7rem, 2.2vw, 0.9rem);
+  font-weight: 600;
+  letter-spacing: 0.38em;
+  text-transform: uppercase;
+  color: #f5f3ff;
+  text-shadow:
+    0 0 16px rgba(196, 181, 253, 0.9),
+    0 1px 2px rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+  padding: 0 0.15em;
+}
+
+/* ── Glass card ──────────────────────────────────────── */
+
+.glass-card {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  padding: clamp(1.5rem, 4vw, 2rem);
+  border-radius: 20px;
+  background: linear-gradient(
+    135deg,
+    rgba(35, 22, 58, 0.5) 0%,
+    rgba(15, 8, 28, 0.6) 100%
+  );
+  border: 1px solid rgba(196, 181, 253, 0.2);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow:
+    0 8px 40px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(139, 92, 246, 0.12) inset,
+    0 0 80px rgba(124, 58, 237, 0.12);
+}
+
+.glass-card h2 {
+  margin: 0 0 0.65rem;
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: #faf5ff;
+  letter-spacing: 0.02em;
+}
+
+.glass-card > p {
+  margin: 0 0 1.5rem;
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: rgba(216, 180, 254, 0.78);
+}
+
+/* ── Buttons (text only) ─────────────────────────────── */
+
+.btn-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  width: 100%;
+}
+
+.nova-btn {
+  width: 100%;
+  padding: 0.95rem 1.25rem;
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  border-radius: 14px;
+  cursor: pointer;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    filter 0.2s ease,
+    background 0.2s ease;
+}
+
+.nova-btn:active {
+  transform: scale(0.98);
+}
+
+.nova-btn-primary {
+  color: #fff;
+  border: none;
+  background: linear-gradient(135deg, #6d28d9 0%, #9333ea 50%, #a855f7 100%);
+  box-shadow:
+    0 4px 28px rgba(124, 58, 237, 0.45),
+    0 0 0 1px rgba(216, 180, 254, 0.15) inset;
+}
+
+.nova-btn-primary:hover {
+  filter: brightness(1.1);
+  box-shadow:
+    0 6px 36px rgba(139, 92, 246, 0.55),
+    0 0 48px rgba(124, 58, 237, 0.25);
+}
+
+.nova-btn-secondary {
+  color: #ede9fe;
+  background: rgba(12, 6, 24, 0.55);
+  border: 1px solid rgba(196, 181, 253, 0.35);
+  box-shadow: 0 2px 20px rgba(0, 0, 0, 0.3);
+}
+
+.nova-btn-secondary:hover {
+  background: rgba(45, 28, 75, 0.6);
+  border-color: rgba(216, 180, 254, 0.5);
+  box-shadow: 0 4px 28px rgba(139, 92, 246, 0.18);
+}
+
+.nova-btn-ghost {
+  display: block;
+  width: 100%;
+  margin-top: 1rem;
+  padding: 0.6rem;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: rgba(196, 181, 253, 0.85);
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+
+.nova-btn-ghost:hover {
+  color: #f5f3ff;
+  background: rgba(139, 92, 246, 0.1);
+}
+
+/* ── Forms ───────────────────────────────────────────── */
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  text-align: left;
+}
+
+.form-group label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: rgba(196, 181, 253, 0.95);
+}
+
+.form-group input {
+  width: 100%;
+  padding: 0.8rem 1rem;
+  font-family: inherit;
+  font-size: 1rem;
+  color: #faf5ff;
+  background: rgba(8, 4, 16, 0.65);
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  border-radius: 12px;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.form-group input::placeholder {
+  color: rgba(167, 139, 250, 0.45);
+}
+
+.form-group input:focus {
+  border-color: rgba(196, 181, 253, 0.7);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2);
+}
+
+/* ── Guest view ──────────────────────────────────────── */
+
+.guest-view {
+  text-align: center;
+  padding: 0.25rem 0;
+}
+
+.guest-view h2 {
+  margin: 0;
+  font-size: clamp(1.2rem, 4vw, 1.45rem);
+  font-weight: 600;
+  color: #f5f3ff;
+  text-shadow: 0 0 24px rgba(167, 139, 250, 0.5);
+}
+
+.guest-view p {
+  margin: 0.75rem 0 0;
+  font-size: 0.9rem;
+  color: rgba(196, 181, 253, 0.65);
+}
+
+/* ── Responsive ──────────────────────────────────────── */
+
+@media (min-width: 520px) {
+  .btn-row {
+    flex-direction: row;
+  }
+
+  .btn-row .nova-btn {
+    flex: 1;
+  }
+}
+
+@media (max-width: 600px) {
+  .singularity {
+    width: min(380px, 110vw);
+    height: min(380px, 110vw);
+  }
+
+  .mc-title {
+    font-size: clamp(1.35rem, 8vw, 2.5rem);
+  }
+
+  .tierlists-label {
+    letter-spacing: 0.28em;
+    font-size: 0.65rem;
+  }
+
+  .tierlists-divider {
+    max-width: 60px;
+  }
+}
+
+@media (max-width: 380px) {
+  .glass-card {
+    padding: 1.25rem;
+  }
+
+  .mc-title__layer--4 {
+    transform: translate(4px, 6px);
+  }
+
+  .mc-title__layer--3 {
+    transform: translate(3px, 4px);
+  }
+}

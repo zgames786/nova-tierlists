@@ -1,0 +1,129 @@
+.admin-login {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  position: relative;
+  font-family: 'Outfit', system-ui, sans-serif;
+  color: #ede9fe;
+}
+
+.admin-login__bg {
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(124, 58, 237, 0.25), transparent 55%),
+    linear-gradient(180deg, #12081f 0%, #080412 100%);
+  z-index: 0;
+}
+
+.admin-login__card {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 420px;
+  padding: 2rem;
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(35, 22, 58, 0.85), rgba(15, 8, 28, 0.9));
+  border: 1px solid rgba(196, 181, 253, 0.2);
+  box-shadow:
+    0 8px 40px rgba(0, 0, 0, 0.5),
+    0 0 60px rgba(124, 58, 237, 0.12);
+}
+
+.admin-login__back {
+  display: inline-block;
+  margin-bottom: 1.5rem;
+  font-size: 0.9rem;
+  color: rgba(196, 181, 253, 0.85);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.admin-login__back:hover {
+  color: #f5f3ff;
+}
+
+.admin-login__header h1 {
+  margin: 0 0 0.35rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #faf5ff;
+}
+
+.admin-login__header p {
+  margin: 0 0 1.5rem;
+  font-size: 0.95rem;
+  color: rgba(216, 180, 254, 0.75);
+}
+
+.admin-login__form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+}
+
+.admin-login__error {
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.35);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+}
+
+.admin-login__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  text-align: left;
+}
+
+.admin-login__field label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: rgba(196, 181, 253, 0.95);
+}
+
+.admin-login__field input {
+  width: 100%;
+  padding: 0.8rem 1rem;
+  font-family: inherit;
+  font-size: 1rem;
+  color: #faf5ff;
+  background: rgba(8, 4, 16, 0.7);
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  border-radius: 10px;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.admin-login__field input:focus {
+  border-color: rgba(196, 181, 253, 0.7);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2);
+}
+
+.admin-login__submit {
+  margin-top: 0.25rem;
+  padding: 0.9rem 1.25rem;
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #6d28d9, #9333ea);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: filter 0.2s, transform 0.2s;
+}
+
+.admin-login__submit:hover {
+  filter: brightness(1.1);
+}
+
+.admin-login__submit:active {
+  transform: scale(0.98);
+}
