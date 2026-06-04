@@ -1,16 +1,43 @@
-import { STORAGE_KEY, DATA_VERSION, loadTierlists } from './tierlistsStorage'
+import { getManagedAdmins } from './adminStorage'
+import { prepareAppData } from './appData'
+import { resolvePlayerDisplay } from './tierlistHelpers'
+import { DATA_VERSION, getPointSystem } from './tierlistsStorage'
 
 export const BACKUP_FILENAME = 'novasmp-tierlists-backup.json'
+export const PUBLIC_RANKINGS_FILENAME = 'novasmp-public-rankings.json'
 
 export function buildBackupPayload(data, session = null) {
   return {
     version: DATA_VERSION,
     exportedAt: new Date().toISOString(),
     tierlists: data.tierlists ?? [],
-    admins: data.admins ?? [],
+    admins: getManagedAdmins(data),
     logs: data.logs ?? [],
     settings: data.settings ?? {},
     session: session ?? null,
+  }
+}
+
+export function buildPublicRankingsPayload(data) {
+  return {
+    version: DATA_VERSION,
+    exportedAt: new Date().toISOString(),
+    type: 'public-rankings',
+    tierlists: (data.tierlists ?? []).map((tierlist) => ({
+      id: tierlist.id,
+      name: tierlist.name,
+      isCalculated: Boolean(tierlist.isCalculated),
+      pointSystem: getPointSystem(tierlist),
+      players: (tierlist.players ?? []).map((player, index) => {
+        const display = resolvePlayerDisplay(player, tierlist)
+        return {
+          rank: index + 1,
+          name: player.name,
+          tier: display.tier,
+          points: display.points,
+        }
+      }),
+    })),
   }
 }
 
@@ -37,16 +64,20 @@ export function validateBackupPayload(payload) {
   return { valid: true }
 }
 
-export function downloadBackupJson(payload) {
+export function downloadBackupJson(payload, filename = BACKUP_FILENAME) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = BACKUP_FILENAME
+  link.download = filename
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
   URL.revokeObjectURL(url)
+}
+
+export function downloadPublicRankingsJson(payload) {
+  downloadBackupJson(payload, PUBLIC_RANKINGS_FILENAME)
 }
 
 export function parseBackupFile(file) {
@@ -64,14 +95,12 @@ export function parseBackupFile(file) {
   })
 }
 
-export function applyImportedBackup(payload) {
-  const imported = {
+export function buildImportedAppData(payload) {
+  return prepareAppData({
     version: DATA_VERSION,
     tierlists: payload.tierlists,
-    admins: payload.admins ?? [],
     logs: payload.logs ?? [],
     settings: payload.settings ?? {},
-  }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(imported))
-  return loadTierlists()
+    admins: payload.admins ?? [],
+  })
 }

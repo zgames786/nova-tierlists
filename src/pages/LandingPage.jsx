@@ -1,5 +1,5 @@
-import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import '../App.css'
 
 const LIGHT_STREAKS = [
@@ -17,7 +17,12 @@ const LIGHT_STREAKS = [
 
 export default function LandingPage() {
   const navigate = useNavigate()
-  const [showGuest, setShowGuest] = useState(false)
+  const { enterGuest } = useAuth()
+
+  const handleContinueAsGuest = () => {
+    enterGuest()
+    navigate('/rankings')
+  }
 
   return (
     <div className="nova-app">
@@ -74,41 +79,29 @@ export default function LandingPage() {
           </h1>
         </header>
 
-        {!showGuest ? (
-          <div className="glass-card">
-            <h2>Welcome</h2>
-            <p>
-              Rank and explore NovaSMP tierlists. Sign in as an admin to manage lists,
-              or continue as a guest to browse.
-            </p>
-            <div className="btn-row">
-              <button
-                type="button"
-                className="nova-btn nova-btn-primary"
-                onClick={() => navigate('/admin/login')}
-              >
-                Admin Login
-              </button>
-              <button
-                type="button"
-                className="nova-btn nova-btn-secondary"
-                onClick={() => setShowGuest(true)}
-              >
-                Continue as Guest
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="glass-card">
-            <div className="guest-view">
-              <h2>Tierlists coming soon.</h2>
-              <p>Check back later for the full tierlist experience.</p>
-            </div>
-            <button type="button" className="nova-btn-ghost" onClick={() => setShowGuest(false)}>
-              ← Back to home
+        <div className="glass-card">
+          <h2>Welcome</h2>
+          <p>
+            Rank and explore NovaSMP tierlists. Sign in as an admin to manage lists,
+            or continue as a guest to browse.
+          </p>
+          <div className="btn-row">
+            <button
+              type="button"
+              className="nova-btn nova-btn-primary"
+              onClick={() => navigate('/admin/login')}
+            >
+              Admin Login
+            </button>
+            <button
+              type="button"
+              className="nova-btn nova-btn-secondary"
+              onClick={handleContinueAsGuest}
+            >
+              Continue as Guest
             </button>
           </div>
-        )}
+        </div>
       </main>
     </div>
   )

@@ -1,8 +1,10 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react'
 import {
-  canCreateAdmins,
-  createAdminAccount,
+  canManageAdminAccounts,
+  enterGuest as authEnterGuest,
   getSession,
+  isAdminUser,
+  isGuest,
   isOwner,
   login as authLogin,
   logout as authLogout,
@@ -13,11 +15,17 @@ const AuthContext = createContext(null)
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => getSession())
 
-  const login = useCallback((username, password) => {
-    const result = authLogin(username, password)
+  const login = useCallback((username, password, appData) => {
+    const result = authLogin(username, password, appData)
     if (result.success) {
       setUser(result.user)
     }
+    return result
+  }, [])
+
+  const enterGuest = useCallback(() => {
+    const result = authEnterGuest()
+    setUser(result.user)
     return result
   }, [])
 
@@ -26,22 +34,20 @@ export function AuthProvider({ children }) {
     setUser(null)
   }, [])
 
-  const createAdmin = useCallback(
-    (username, password) => createAdminAccount(username, password, user),
-    [user],
-  )
-
   const value = useMemo(
     () => ({
       user,
       isAuthenticated: Boolean(user),
+      isGuest: isGuest(user),
+      isAdmin: isAdminUser(user),
       isOwner: isOwner(user),
-      canCreateAdmins: canCreateAdmins(user),
+      canManageAdmins: canManageAdminAccounts(user),
+      canCreateAdmins: canManageAdminAccounts(user),
       login,
+      enterGuest,
       logout,
-      createAdmin,
     }),
-    [user, login, logout, createAdmin],
+    [user, login, enterGuest, logout],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

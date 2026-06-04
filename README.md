@@ -1,16 +1,62 @@
-# React + Vite
+# NovaSMP Tierlists
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + Vite tierlist admin and guest rankings app with **Firebase Firestore** shared storage.
 
-Currently, two official plugins are available:
+## Setup
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+1. Install dependencies:
 
-## React Compiler
+```bash
+npm install
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+2. Copy `.env.example` to `.env` and paste your Firebase web app config from **Firebase Console → Project settings → Your apps**:
 
-## Expanding the ESLint configuration
+```bash
+cp .env.example .env
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+3. In **Firestore Database**, create a database (test mode is fine for development).
+
+4. Set Firestore security rules so the app can read/write the shared document (adjust for production):
+
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /appData/{docId} {
+      allow read, write: if true;
+    }
+  }
+}
+```
+
+5. Run the dev server:
+
+```bash
+npm run dev
+```
+
+## Firestore data
+
+- Collection: `appData`
+- Document: `novaSmp`
+- Shape: `{ tierlists, admins, logs, settings }`
+
+On first load, if the document is missing, the app creates default data (Overall tierlist + empty admins/logs).
+
+The owner account (`ZGames786` / `NovaAdmin786`) is built into the app and is not stored in `admins`.
+
+## Storage
+
+| Data | Location |
+|------|----------|
+| Tierlists, players, logs, settings, admin accounts | Firestore `appData/novaSmp` |
+| Login session | `localStorage` (`novasmp_admin_session`) |
+
+Old `localStorage` tierlist/admin data is **not** migrated.
+
+## Default owner login
+
+- Username: `ZGames786`
+- Password: `NovaAdmin786`

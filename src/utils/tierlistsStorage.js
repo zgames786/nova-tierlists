@@ -1,6 +1,5 @@
 import { getEffectiveTier, resolvePlayerDisplay } from './tierlistHelpers'
 
-export const STORAGE_KEY = 'novaTierlists'
 export const DATA_VERSION = 4
 export const OVERALL_ID = 'overall'
 
@@ -28,13 +27,6 @@ export const TIER_COLORS = {
   F: '#f87171',
 }
 
-const LEGACY_ACCOUNTS_KEY = 'novasmp_admin_accounts'
-
-const DEFAULT_OWNER = {
-  username: 'ZGames786',
-  password: 'NovaAdmin786',
-  role: 'owner',
-}
 
 export function getAutoTierForPosition(position) {
   if (position === 1) return 'S+'
@@ -69,14 +61,6 @@ function createDefaultTierlist(overrides = {}) {
       ? { id: OVERALL_ID, isDefault: true, isCalculated: true, contributesToOverall: false }
       : { isDefault: false, isCalculated: false, contributesToOverall: true }),
   }
-}
-
-const DEFAULT_DATA = {
-  version: DATA_VERSION,
-  settings: {},
-  admins: [DEFAULT_OWNER],
-  logs: [],
-  tierlists: [createDefaultTierlist()],
 }
 
 function slugify(name) {
@@ -239,7 +223,7 @@ export function calculateOverall(data) {
   return { ...data, tierlists }
 }
 
-function migrateTierlist(tierlist) {
+export function migrateTierlistFromRaw(tierlist) {
   const isOverall = tierlist.id === OVERALL_ID
 
   const pointSystem = {
@@ -287,78 +271,6 @@ function migrateTierlist(tierlist) {
   return base.autoTierAssignment ? applyAutoAssignment(withPlayers) : withPlayers
 }
 
-function migrateAdmins(parsed) {
-  if (parsed.admins?.length) {
-    return parsed.admins
-  }
-  try {
-    const legacy = JSON.parse(localStorage.getItem(LEGACY_ACCOUNTS_KEY) || '[]')
-    if (legacy.length) return legacy
-  } catch {
-    /* ignore */
-  }
-  return [DEFAULT_OWNER]
-}
-
-function migrateData(parsed) {
-  let tierlists = (parsed.tierlists ?? []).map(migrateTierlist)
-  if (!tierlists.some((t) => t.id === OVERALL_ID)) {
-    tierlists.unshift(createDefaultTierlist())
-  }
-
-  const data = {
-    version: DATA_VERSION,
-    settings: parsed.settings ?? {},
-    admins: migrateAdmins(parsed),
-    logs: Array.isArray(parsed.logs) ? parsed.logs : [],
-    tierlists,
-  }
-
-  return calculateOverall(data)
-}
-
-export function loadTierlists() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) {
-      const fresh = structuredClone(DEFAULT_DATA)
-      saveTierlists(fresh)
-      return fresh
-    }
-    const parsed = JSON.parse(raw)
-    if (!parsed?.tierlists?.length) {
-      const fresh = structuredClone(DEFAULT_DATA)
-      saveTierlists(fresh)
-      return fresh
-    }
-    const migrated = migrateData(parsed)
-    saveTierlists(migrated)
-    return migrated
-  } catch {
-    const fresh = structuredClone(DEFAULT_DATA)
-    saveTierlists(fresh)
-    return fresh
-  }
-}
-
-export function saveTierlists(data) {
-  const calculated = calculateOverall(data)
-  const toSave = { ...calculated, version: DATA_VERSION }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave))
-  if (toSave.admins?.length) {
-    localStorage.setItem(LEGACY_ACCOUNTS_KEY, JSON.stringify(toSave.admins))
-  }
-  return toSave
-}
-
-export function getAdminsFromData(data) {
-  return data?.admins?.length ? data.admins : [DEFAULT_OWNER]
-}
-
-export function setAdminsInData(data, admins) {
-  return { ...data, admins }
-}
-
 function mapTierlist(data, tierlistId, fn) {
   return {
     ...data,
@@ -374,7 +286,16 @@ function finalizeTierlist(tierlist) {
 }
 
 function persist(data) {
-  return saveTierlists(data)
+  const calculated = calculateOverall({
+    version: DATA_VERSION,
+    settings: data.settings ?? {},
+    logs: Array.isArray(data.logs) ? data.logs : [],
+    tierlists: data.tierlists ?? [],
+  })
+  return {
+    ...calculated,
+    admins: data.admins ?? [],
+  }
 }
 
 function rejectOverallMutation(tierlistId) {

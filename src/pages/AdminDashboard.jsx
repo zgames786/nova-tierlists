@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ChevronDown,
   ChevronUp,
@@ -16,16 +16,33 @@ import {
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import AdminLogsModal from '../components/AdminLogsModal'
+import { useAppData } from '../context/AppDataContext'
 import { useAuth } from '../context/AuthContext'
-import { ACTION_TYPES, appendLog, createLogEntry } from '../utils/activityLog'
+import {
+  createAdminAccount,
+  deleteAdminAccount,
+  updateAdminAccount,
+} from '../utils/adminAuth'
+import { getManagedAdmins } from '../utils/adminStorage'
+import { ACTION_TYPES, appendLog, createLogEntry, formatLogTime } from '../utils/activityLog'
 import {
   BACKUP_FILENAME,
-  applyImportedBackup,
   buildBackupPayload,
+  buildImportedAppData,
+  buildPublicRankingsPayload,
   downloadBackupJson,
+  downloadPublicRankingsJson,
   parseBackupFile,
   validateBackupPayload,
 } from '../utils/backup'
+import { findAdminById } from '../utils/adminStorage'
+import {
+  snapshotAdmin,
+  snapshotPlayer,
+  snapshotPlayers,
+  snapshotPointSystem,
+  snapshotTierlistForCreate,
+} from '../utils/logSnapshots'
 import {
   TIERS,
   TIER_COLORS,
@@ -38,10 +55,8 @@ import {
   getEffectiveTier,
   getPointSystem,
   isOverallTierlist,
-  loadTierlists,
   movePlayer,
   resolvePlayerDisplay,
-  saveTierlists,
   updatePlayer,
   updatePointSystem,
   updateTierlistSettings,
@@ -50,11 +65,21 @@ import './AdminDashboard.css'
 
 export default function AdminDashboard() {
   const navigate = useNavigate()
-  const { user, logout, canCreateAdmins, createAdmin, isOwner } = useAuth()
+  const { user, logout, isGuest, canManageAdmins } = useAuth()
+  const { data, saveAppData, saving, error: dataError } = useAppData()
   const importInputRef = useRef(null)
 
-  const [data, setData] = useState(() => loadTierlists())
-  const [activeId, setActiveId] = useState(() => loadTierlists().tierlists[0]?.id ?? 'overall')
+  const [activeId, setActiveId] = useState('overall')
+
+  useEffect(() => {
+    if (data?.tierlists?.length) {
+      setActiveId((current) =>
+        data.tierlists.some((tierlist) => tierlist.id === current)
+          ? current
+          : data.tierlists[0].id,
+      )
+    }
+  }, [data])
 
   const [showCreateTierlist, setShowCreateTierlist] = useState(false)
   const [newTierlistName, setNewTierlistName] = useState('')
@@ -72,12 +97,34 @@ export default function AdminDashboard() {
   const [newUsername, setNewUsername] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [createMessage, setCreateMessage] = useState({ type: '', text: '' })
+  const [adminAccounts, setAdminAccounts] = useState([])
+  const [editAdminModal, setEditAdminModal] = useState(null)
+  const [deleteAdminTarget, setDeleteAdminTarget] = useState(null)
+
+  useEffect(() => {
+    if (canManageAdmins && data) {
+      setAdminAccounts(getManagedAdmins(data))
+    }
+  }, [canManageAdmins, data])
+
+  if (!data) {
+    return null
+  }
 
   const activeTierlist = data.tierlists.find((t) => t.id === activeId) ?? data.tierlists[0]
   const activePointSystem = activeTierlist ? getPointSystem(activeTierlist) : {}
   const isOverallView = activeTierlist ? isOverallTierlist(activeTierlist) : false
+  const isReadOnlyView = isGuest || isOverallView
 
-  const makeLog = (actionType, targetType, targetName, details) =>
+  const makeLog = ({
+    actionType,
+    targetType,
+    targetName,
+    details,
+    beforeState = null,
+    afterState = null,
+    canUndo = false,
+  }) =>
     createLogEntry({
       adminUsername: user?.username,
       adminRole: user?.role,
@@ -85,39 +132,58 @@ export default function AdminDashboard() {
       targetType,
       targetName,
       details,
+      beforeState,
+      afterState,
+      canUndo,
     })
 
-  const logAndSave = (newData, entry) => {
+  const logAndSave = async (newData, entry) => {
     const withLog = entry ? appendLog(newData, entry) : newData
-    const saved = saveTierlists(withLog)
-    setData(saved)
-    return saved
+    return saveAppData(withLog)
   }
 
-  const handleLogout = () => {
-    const entry = makeLog(
-      ACTION_TYPES.ADMIN_LOGOUT,
-      'session',
-      user?.username ?? '',
-      `${user?.username ?? 'Admin'} logged out`,
-    )
-    logAndSave(data, entry)
+  const handleLogout = async () => {
+    const entry = makeLog({
+      actionType: ACTION_TYPES.ADMIN_LOGOUT,
+      targetType: 'session',
+      targetName: user?.username ?? '',
+      details: `${user?.username ?? 'Admin'} logged out`,
+    })
+    try {
+      await logAndSave(data, entry)
+    } catch {
+      /* still sign out if log save fails */
+    }
     logout()
     navigate('/')
   }
 
-  const handleExport = () => {
+  const handleExit = () => {
+    logout()
+    navigate('/')
+  }
+
+  const handleExport = async () => {
+    if (isGuest) {
+      downloadPublicRankingsJson(buildPublicRankingsPayload(data))
+      return
+    }
+
     const payload = buildBackupPayload(data, user)
     downloadBackupJson(payload)
-    logAndSave(
-      data,
-      makeLog(
-        ACTION_TYPES.BACKUP_EXPORTED,
-        'backup',
-        BACKUP_FILENAME,
-        'Exported full local app data backup',
-      ),
-    )
+    try {
+      await logAndSave(
+        data,
+        makeLog({
+          actionType: ACTION_TYPES.BACKUP_EXPORTED,
+          targetType: 'backup',
+          targetName: BACKUP_FILENAME,
+          details: 'Exported full app data backup',
+        }),
+      )
+    } catch {
+      setImportError('Export downloaded, but failed to save export log to Firestore.')
+    }
   }
 
   const handleImportClick = () => {
@@ -145,39 +211,49 @@ export default function AdminDashboard() {
         return
       }
 
-      const imported = applyImportedBackup(payload)
-      const saved = logAndSave(
+      const imported = buildImportedAppData(payload)
+      const saved = await logAndSave(
         imported,
-        makeLog(
-          ACTION_TYPES.BACKUP_IMPORTED,
-          'backup',
-          file.name,
-          'Imported backup and replaced local app data',
-        ),
+        makeLog({
+          actionType: ACTION_TYPES.BACKUP_IMPORTED,
+          targetType: 'backup',
+          targetName: file.name,
+          details: 'Imported backup and replaced app data in Firestore',
+        }),
       )
       if (saved.tierlists.some((t) => t.id === activeId)) {
         setActiveId(activeId)
       } else {
         setActiveId(saved.tierlists[0]?.id ?? 'overall')
       }
+      if (canManageAdmins) {
+        setAdminAccounts(getManagedAdmins(saved))
+      }
     } catch (err) {
       setImportError(err.message ?? 'Import failed.')
     }
   }
 
-  const handleCreateTierlist = (e) => {
+  const handleCreateTierlist = async (e) => {
     e.preventDefault()
     setTierlistError('')
     const result = createTierlist(data, newTierlistName)
     if (result.success) {
-      logAndSave(
+      const created = result.data.tierlists.find((tierlist) => tierlist.id === result.tierlist.id)
+      await logAndSave(
         result.data,
-        makeLog(
-          ACTION_TYPES.TIERLIST_CREATED,
-          'tierlist',
-          result.tierlist.name,
-          `Created tierlist "${result.tierlist.name}"`,
-        ),
+        makeLog({
+          actionType: ACTION_TYPES.TIERLIST_CREATED,
+          targetType: 'tierlist',
+          targetName: result.tierlist.name,
+          details: `Created tierlist "${result.tierlist.name}"`,
+          beforeState: null,
+          afterState: {
+            tierlistId: created.id,
+            tierlist: snapshotTierlistForCreate(created),
+          },
+          canUndo: true,
+        }),
       )
       setActiveId(result.tierlist.id)
       setNewTierlistName('')
@@ -202,25 +278,35 @@ export default function AdminDashboard() {
     setTierSettingsModal({ ...getPointSystem(activeTierlist) })
   }
 
-  const handleSaveTierSettings = (e) => {
+  const handleSaveTierSettings = async (e) => {
     e.preventDefault()
     if (!tierSettingsModal || !activeTierlist) return
     const result = updatePointSystem(data, activeTierlist.id, tierSettingsModal)
     if (result.success) {
-      logAndSave(
+      const updated = result.data.tierlists.find((tierlist) => tierlist.id === activeTierlist.id)
+      await logAndSave(
         result.data,
-        makeLog(
-          ACTION_TYPES.TIERLIST_POINTS_UPDATED,
-          'tierlist',
-          activeTierlist.name,
-          `Updated point system for "${activeTierlist.name}"`,
-        ),
+        makeLog({
+          actionType: ACTION_TYPES.TIERLIST_POINT_SYSTEM_UPDATED,
+          targetType: 'tierlist',
+          targetName: activeTierlist.name,
+          details: `Updated point system for "${activeTierlist.name}"`,
+          beforeState: {
+            tierlistId: activeTierlist.id,
+            pointSystem: snapshotPointSystem(activeTierlist),
+          },
+          afterState: {
+            tierlistId: activeTierlist.id,
+            pointSystem: snapshotPointSystem(updated),
+          },
+          canUndo: true,
+        }),
       )
       setTierSettingsModal(null)
     }
   }
 
-  const handleSaveSettings = (e) => {
+  const handleSaveSettings = async (e) => {
     e.preventDefault()
     if (!settingsModal || !activeTierlist) return
     setSettingsError('')
@@ -230,17 +316,20 @@ export default function AdminDashboard() {
       const newName = settingsModal.name.trim()
       const renamed = result.oldName && result.oldName !== newName
       if (renamed) {
-        logAndSave(
+        await logAndSave(
           result.data,
-          makeLog(
-            ACTION_TYPES.TIERLIST_RENAMED,
-            'tierlist',
-            newName,
-            `Renamed tierlist from "${result.oldName}" to "${newName}"`,
-          ),
+          makeLog({
+            actionType: ACTION_TYPES.TIERLIST_RENAMED,
+            targetType: 'tierlist',
+            targetName: newName,
+            details: `Renamed tierlist from "${result.oldName}" to "${newName}"`,
+            beforeState: { tierlistId: activeTierlist.id, name: result.oldName },
+            afterState: { tierlistId: activeTierlist.id, name: newName },
+            canUndo: true,
+          }),
         )
       } else {
-        logAndSave(result.data)
+        await logAndSave(result.data)
       }
       setSettingsModal(null)
     } else {
@@ -274,7 +363,7 @@ export default function AdminDashboard() {
     })
   }
 
-  const handleSavePlayer = (e) => {
+  const handleSavePlayer = async (e) => {
     e.preventDefault()
     if (!playerModal || !activeTierlist) return
 
@@ -311,77 +400,206 @@ export default function AdminDashboard() {
       const points = Number(playerModal.points)
       const playerName = playerModal.name.trim()
       const isAdd = playerModal.mode === 'add'
-
-      logAndSave(
-        result.data,
-        makeLog(
-          isAdd ? ACTION_TYPES.PLAYER_ADDED : ACTION_TYPES.PLAYER_EDITED,
-          'player',
-          playerName,
-          isAdd
-            ? `Added ${playerName} to ${activeTierlist.name} with tier ${tier} and ${points} points`
-            : `Edited ${playerName} on ${activeTierlist.name} (tier ${tier}, ${points} points)`,
-        ),
+      const updatedTierlist = result.data.tierlists.find(
+        (tierlist) => tierlist.id === activeTierlist.id,
       )
+
+      if (isAdd) {
+        const addedPlayer = updatedTierlist.players.find(
+          (player) => player.id === result.player?.id,
+        )
+        await logAndSave(
+          result.data,
+          makeLog({
+            actionType: ACTION_TYPES.PLAYER_ADDED,
+            targetType: 'player',
+            targetName: playerName,
+            details: `Added ${playerName} to ${activeTierlist.name} with tier ${tier} and ${points} points`,
+            beforeState: { tierlistId: activeTierlist.id },
+            afterState: {
+              tierlistId: activeTierlist.id,
+              player: snapshotPlayer(addedPlayer),
+            },
+            canUndo: true,
+          }),
+        )
+      } else {
+        const beforePlayer = activeTierlist.players.find(
+          (player) => player.id === playerModal.playerId,
+        )
+        const afterPlayer = updatedTierlist.players.find(
+          (player) => player.id === playerModal.playerId,
+        )
+        await logAndSave(
+          result.data,
+          makeLog({
+            actionType: ACTION_TYPES.PLAYER_EDITED,
+            targetType: 'player',
+            targetName: playerName,
+            details: `Edited ${playerName} on ${activeTierlist.name} (tier ${tier}, ${points} points)`,
+            beforeState: {
+              tierlistId: activeTierlist.id,
+              player: snapshotPlayer(beforePlayer),
+            },
+            afterState: {
+              tierlistId: activeTierlist.id,
+              player: snapshotPlayer(afterPlayer),
+            },
+            canUndo: true,
+          }),
+        )
+      }
       setPlayerModal(null)
     }
   }
 
-  const handleDeletePlayer = () => {
+  const handleDeletePlayer = async () => {
     if (!deleteTarget || !activeTierlist) return
+    const playerIndex = activeTierlist.players.findIndex(
+      (player) => player.id === deleteTarget.id,
+    )
     const result = deletePlayer(data, activeTierlist.id, deleteTarget.id)
     if (result.success) {
-      logAndSave(
+      await logAndSave(
         result.data,
-        makeLog(
-          ACTION_TYPES.PLAYER_DELETED,
-          'player',
-          deleteTarget.name,
-          `Removed ${deleteTarget.name} from ${activeTierlist.name}`,
-        ),
+        makeLog({
+          actionType: ACTION_TYPES.PLAYER_DELETED,
+          targetType: 'player',
+          targetName: deleteTarget.name,
+          details: `Removed ${deleteTarget.name} from ${activeTierlist.name}`,
+          beforeState: {
+            tierlistId: activeTierlist.id,
+            player: snapshotPlayer(deleteTarget),
+            playerIndex,
+            players: snapshotPlayers(activeTierlist.players),
+          },
+          afterState: {},
+          canUndo: true,
+        }),
       )
       setDeleteTarget(null)
     }
   }
 
-  const handleMove = (playerId, direction) => {
+  const handleMove = async (playerId, direction) => {
+    const beforeTierlist = data.tierlists.find((tierlist) => tierlist.id === activeTierlist.id)
     const result = movePlayer(data, activeTierlist.id, playerId, direction)
     if (result.success) {
       const moved = result.moved
-      logAndSave(
+      const afterTierlist = result.data.tierlists.find(
+        (tierlist) => tierlist.id === activeTierlist.id,
+      )
+      await logAndSave(
         result.data,
-        makeLog(
-          direction === 'up'
-            ? ACTION_TYPES.PLAYER_MOVED_UP
-            : ACTION_TYPES.PLAYER_MOVED_DOWN,
-          'player',
-          moved?.name ?? '',
-          `Moved ${moved?.name ?? 'player'} ${direction} on ${activeTierlist.name}`,
-        ),
+        makeLog({
+          actionType:
+            direction === 'up'
+              ? ACTION_TYPES.PLAYER_MOVED_UP
+              : ACTION_TYPES.PLAYER_MOVED_DOWN,
+          targetType: 'player',
+          targetName: moved?.name ?? '',
+          details: `Moved ${moved?.name ?? 'player'} ${direction} on ${activeTierlist.name}`,
+          beforeState: {
+            tierlistId: activeTierlist.id,
+            players: snapshotPlayers(beforeTierlist.players),
+          },
+          afterState: {
+            tierlistId: activeTierlist.id,
+            players: snapshotPlayers(afterTierlist.players),
+          },
+          canUndo: true,
+        }),
       )
     }
   }
 
-  const handleCreateAdmin = (e) => {
+  const handleCreateAdmin = async (e) => {
     e.preventDefault()
     setCreateMessage({ type: '', text: '' })
     const trimmed = newUsername.trim()
-    const result = createAdmin(newUsername, newPassword)
+    const result = createAdminAccount(newUsername, newPassword, user, data)
     if (result.success) {
-      logAndSave(
+      await logAndSave(
         result.data,
-        makeLog(
-          ACTION_TYPES.ADMIN_CREATED,
-          'admin',
-          trimmed,
-          `Created admin account "${trimmed}"`,
-        ),
+        makeLog({
+          actionType: ACTION_TYPES.ADMIN_CREATED,
+          targetType: 'admin',
+          targetName: trimmed,
+          details: `Owner ${user?.username} created admin account ${trimmed}`,
+          beforeState: null,
+          afterState: { admin: snapshotAdmin(result.admin) },
+          canUndo: true,
+        }),
       )
+      setAdminAccounts(getManagedAdmins(result.data))
       setCreateMessage({ type: 'success', text: `Admin "${trimmed}" created.` })
       setNewUsername('')
       setNewPassword('')
     } else {
       setCreateMessage({ type: 'error', text: result.error })
+    }
+  }
+
+  const openEditAdmin = (admin) => {
+    setEditAdminModal({
+      id: admin.id,
+      username: admin.username,
+      password: admin.password,
+    })
+  }
+
+  const handleSaveEditAdmin = async (e) => {
+    e.preventDefault()
+    if (!editAdminModal) return
+
+    const trimmed = editAdminModal.username.trim()
+    const beforeAdmin = findAdminById(data, editAdminModal.id)
+    const result = updateAdminAccount(
+      editAdminModal.id,
+      editAdminModal.username,
+      editAdminModal.password,
+      user,
+      data,
+    )
+    if (result.success) {
+      await logAndSave(
+        result.data,
+        makeLog({
+          actionType: ACTION_TYPES.ADMIN_UPDATED,
+          targetType: 'admin',
+          targetName: trimmed,
+          details: `Owner ${user?.username} updated admin account ${result.previousUsername ?? trimmed}`,
+          beforeState: { admin: snapshotAdmin(beforeAdmin) },
+          afterState: { admin: snapshotAdmin(result.admin) },
+          canUndo: true,
+        }),
+      )
+      setAdminAccounts(getManagedAdmins(result.data))
+      setEditAdminModal(null)
+    } else {
+      setEditAdminModal((prev) => ({ ...prev, error: result.error }))
+    }
+  }
+
+  const handleDeleteAdmin = async () => {
+    if (!deleteAdminTarget) return
+
+    const result = deleteAdminAccount(deleteAdminTarget.id, user, data)
+    if (result.success) {
+      await logAndSave(
+        result.data,
+        makeLog({
+          actionType: ACTION_TYPES.ADMIN_DELETED,
+          targetType: 'admin',
+          targetName: deleteAdminTarget.username,
+          details: `Owner ${user?.username} deleted admin account ${deleteAdminTarget.username}`,
+          beforeState: { admin: snapshotAdmin(deleteAdminTarget) },
+          afterState: {},
+          canUndo: true,
+        }),
+      )
+      setAdminAccounts(getManagedAdmins(result.data))
+      setDeleteAdminTarget(null)
     }
   }
 
@@ -412,63 +630,94 @@ export default function AdminDashboard() {
           <Shield size={22} className="dashboard-nav__icon" />
           <div>
             <span className="dashboard-nav__title">NovaSMP Tierlists</span>
-            <span className="dashboard-nav__subtitle">Admin Dashboard</span>
+            <span className="dashboard-nav__subtitle">
+              {isGuest ? 'Rankings' : 'Admin Dashboard'}
+            </span>
           </div>
         </div>
 
         <div className="dashboard-nav__actions">
-          <div className="dashboard-nav__user">
-            <span className="dashboard-nav__username">
-              {user?.role === 'owner' ? 'Owner: ' : ''}
-              {user?.username}
-            </span>
-            <span className={`dashboard-nav__role dashboard-nav__role--${user?.role}`}>
-              {user?.role}
-            </span>
-          </div>
-          <button
-            type="button"
-            className="dashboard-nav__link dashboard-nav__btn"
-            onClick={() => setShowLogs(true)}
-          >
-            <ScrollText size={16} />
-            Logs
-          </button>
-          <button
-            type="button"
-            className="dashboard-nav__link dashboard-nav__btn"
-            onClick={handleExport}
-          >
-            <Download size={16} />
-            Export Data
-          </button>
-          <button
-            type="button"
-            className="dashboard-nav__link dashboard-nav__btn"
-            onClick={handleImportClick}
-          >
-            <Upload size={16} />
-            Import Data
-          </button>
-          <input
-            ref={importInputRef}
-            type="file"
-            accept="application/json,.json"
-            className="dashboard-import-input"
-            onChange={handleImportFile}
-            aria-hidden="true"
-            tabIndex={-1}
-          />
-          <button type="button" className="dashboard-nav__logout" onClick={handleLogout}>
-            <LogOut size={18} />
-            Logout
-          </button>
+          {isGuest ? (
+            <>
+              <div className="dashboard-nav__user dashboard-nav__user--guest">
+                <span className="dashboard-nav__username">Guest Mode</span>
+                <span className="dashboard-nav__role dashboard-nav__role--guest">guest</span>
+              </div>
+              <button
+                type="button"
+                className="dashboard-nav__link dashboard-nav__btn"
+                onClick={handleExport}
+              >
+                <Download size={16} />
+                Export Data
+              </button>
+              <button type="button" className="dashboard-nav__exit" onClick={handleExit}>
+                <LogOut size={18} />
+                Exit
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="dashboard-nav__user">
+                <span className="dashboard-nav__username">
+                  {user?.role === 'owner' ? 'Owner: ' : ''}
+                  {user?.username}
+                </span>
+                <span className={`dashboard-nav__role dashboard-nav__role--${user?.role}`}>
+                  {user?.role}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="dashboard-nav__link dashboard-nav__btn"
+                onClick={() => setShowLogs(true)}
+              >
+                <ScrollText size={16} />
+                Logs
+              </button>
+              <button
+                type="button"
+                className="dashboard-nav__link dashboard-nav__btn"
+                onClick={handleExport}
+              >
+                <Download size={16} />
+                Export Data
+              </button>
+              <button
+                type="button"
+                className="dashboard-nav__link dashboard-nav__btn"
+                onClick={handleImportClick}
+              >
+                <Upload size={16} />
+                Import Data
+              </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json,.json"
+                className="dashboard-import-input"
+                onChange={handleImportFile}
+                aria-hidden="true"
+                tabIndex={-1}
+              />
+              <button type="button" className="dashboard-nav__logout" onClick={handleLogout}>
+                <LogOut size={18} />
+                Logout
+              </button>
+            </>
+          )}
         </div>
       </nav>
 
-      {importError && (
+      {(importError || dataError) && (
         <div className="dashboard-import-error" role="alert">
-          {importError}
+          {importError || dataError}
+        </div>
+      )}
+
+      {saving && !isGuest && (
+        <div className="dashboard-saving-banner" role="status">
+          Saving to Firestore…
         </div>
       )}
 
@@ -483,18 +732,20 @@ export default function AdminDashboard() {
             {tl.name}
           </button>
         ))}
-        <button
-          type="button"
-          className="dashboard-tab-add"
-          onClick={() => {
-            setTierlistError('')
-            setShowCreateTierlist(true)
-          }}
-          title="Create tierlist"
-          aria-label="Create tierlist"
-        >
-          <Plus size={18} />
-        </button>
+        {!isGuest && (
+          <button
+            type="button"
+            className="dashboard-tab-add"
+            onClick={() => {
+              setTierlistError('')
+              setShowCreateTierlist(true)
+            }}
+            title="Create tierlist"
+            aria-label="Create tierlist"
+          >
+            <Plus size={18} />
+          </button>
+        )}
       </div>
 
       <main className="dashboard-main">
@@ -505,22 +756,28 @@ export default function AdminDashboard() {
               {isOverallView ? (
                 <>
                   <p className="overall-auto-label">
-                    Auto-calculated from all tierlists
+                    {isGuest
+                      ? 'Auto-calculated overall ranking'
+                      : 'Auto-calculated from all tierlists'}
                   </p>
-                  <p className="overall-auto-hint">
-                    Combined points from every tierlist · tiers by rank ·{' '}
-                    {getAutoTierRangesLabel()}
-                  </p>
+                  {!isGuest && (
+                    <p className="overall-auto-hint">
+                      Combined points from every tierlist · tiers by rank ·{' '}
+                      {getAutoTierRangesLabel()}
+                    </p>
+                  )}
                 </>
               ) : (
                 <p>
-                  {activeTierlist?.autoTierAssignment
-                    ? `Automatic tier assignment · ${getAutoTierRangesLabel()}`
-                    : 'Manual tier assignment — tiers set per player'}
+                  {isGuest
+                    ? 'View-only rankings for this tierlist'
+                    : activeTierlist?.autoTierAssignment
+                      ? `Automatic tier assignment · ${getAutoTierRangesLabel()}`
+                      : 'Manual tier assignment — tiers set per player'}
                 </p>
               )}
             </div>
-            {!isOverallView && (
+            {!isReadOnlyView && (
               <button
                 type="button"
                 className="btn-settings"
@@ -538,7 +795,7 @@ export default function AdminDashboard() {
           <section className="dashboard-card dashboard-card--wide">
             <div className="rankings-header">
               <h2>Player Rankings</h2>
-              {!isOverallView && (
+              {!isReadOnlyView && (
                 <div className="rankings-header__actions">
                   <button type="button" className="btn-tier-settings" onClick={openTierSettings}>
                     Tier Settings
@@ -553,21 +810,23 @@ export default function AdminDashboard() {
 
             <div className="rankings-table">
               <div
-                className={`rankings-row rankings-row--head${isOverallView ? ' rankings-row--overall' : ''}`}
+                className={`rankings-row rankings-row--head${isReadOnlyView ? ' rankings-row--overall' : ''}`}
               >
                 <span>#</span>
                 <span>Player</span>
                 <span>Tier</span>
                 <span>Points</span>
-                {!isOverallView && <span>Mode</span>}
-                {!isOverallView && <span>Actions</span>}
+                {!isReadOnlyView && <span>Mode</span>}
+                {!isReadOnlyView && <span>Actions</span>}
               </div>
 
               {activeTierlist?.players.length === 0 && (
                 <div className="rankings-empty">
-                  {isOverallView
-                    ? 'No players yet. Add players to other tierlists to populate Overall.'
-                    : 'No players yet. Add your first player.'}
+                  {isGuest
+                    ? 'No players ranked on this tierlist yet.'
+                    : isOverallView
+                      ? 'No players yet. Add players to other tierlists to populate Overall.'
+                      : 'No players yet. Add your first player.'}
                 </div>
               )}
 
@@ -576,7 +835,7 @@ export default function AdminDashboard() {
                 return (
                   <div
                     key={player.id}
-                    className={`rankings-row${isOverallView ? ' rankings-row--overall' : ''}`}
+                    className={`rankings-row${isReadOnlyView ? ' rankings-row--overall' : ''}`}
                   >
                     <span>{index + 1}</span>
                     <span className="rankings-player">{player.name}</span>
@@ -587,7 +846,7 @@ export default function AdminDashboard() {
                       >
                         {display.tier}
                       </span>
-                      {!isOverallView &&
+                      {!isReadOnlyView &&
                         display.isManual &&
                         player.autoTier &&
                         player.autoTier !== display.tier && (
@@ -597,7 +856,7 @@ export default function AdminDashboard() {
                         )}
                     </span>
                     <span>{display.points}</span>
-                    {!isOverallView && (
+                    {!isReadOnlyView && (
                       <span>
                         <span
                           className={`mode-badge mode-badge--${player.tierMode === 'manual' ? 'manual' : 'auto'}`}
@@ -606,7 +865,7 @@ export default function AdminDashboard() {
                         </span>
                       </span>
                     )}
-                    {!isOverallView && (
+                    {!isReadOnlyView && (
                       <span className="rankings-actions">
                         <button
                           type="button"
@@ -679,15 +938,23 @@ export default function AdminDashboard() {
             </div>
           </section>
 
-          {canCreateAdmins && (
+          {canManageAdmins && (
             <section className="dashboard-card dashboard-card--wide dashboard-card--owner">
-              <h2>
-                <UserPlus size={20} />
-                Create Admin Account
-              </h2>
-              <p className="dashboard-card__hint">Owner only — add new admin logins.</p>
+              <div className="admin-accounts-header">
+                <div>
+                  <h2>
+                    <UserPlus size={20} />
+                    Admin Accounts
+                  </h2>
+                  <p className="dashboard-card__hint">
+                    Owner only — create and manage admin logins stored in Firestore.
+                  </p>
+                </div>
+                <span className="owner-only-badge">Owner only</span>
+              </div>
 
-              <form className="dashboard-create-form" onSubmit={handleCreateAdmin}>
+              <form className="dashboard-create-form admin-accounts-create" onSubmit={handleCreateAdmin}>
+                <h3 className="admin-accounts-subtitle">Create Admin</h3>
                 {createMessage.text && (
                   <div
                     className={`dashboard-message dashboard-message--${createMessage.type}`}
@@ -723,12 +990,67 @@ export default function AdminDashboard() {
                   </button>
                 </div>
               </form>
+
+              <div className="admin-accounts-list">
+                <h3 className="admin-accounts-subtitle">Admin account list</h3>
+                {adminAccounts.length === 0 ? (
+                  <p className="admin-accounts-empty">No admin accounts created yet.</p>
+                ) : (
+                  <div className="admin-accounts-table-wrap">
+                    <table className="admin-accounts-table">
+                      <thead>
+                        <tr>
+                          <th>Username</th>
+                          <th>Role</th>
+                          <th>Created At</th>
+                          <th>Created By</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adminAccounts.map((admin) => (
+                          <tr key={admin.id}>
+                            <td className="admin-accounts-table__user">{admin.username}</td>
+                            <td>
+                              <span className="dashboard-nav__role dashboard-nav__role--admin">
+                                {admin.role}
+                              </span>
+                            </td>
+                            <td>{formatLogTime(admin.createdAt)}</td>
+                            <td>{admin.createdBy}</td>
+                            <td>
+                              <div className="admin-accounts-actions">
+                                <button
+                                  type="button"
+                                  className="action-btn"
+                                  title="Edit admin"
+                                  onClick={() => openEditAdmin(admin)}
+                                >
+                                  <Pencil size={14} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="action-btn action-btn--danger"
+                                  title="Delete admin"
+                                  onClick={() => setDeleteAdminTarget(admin)}
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </section>
           )}
         </div>
       </main>
 
-      {showCreateTierlist && (
+      {!isGuest && showCreateTierlist && (
         <div className="modal-overlay" onClick={() => setShowCreateTierlist(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
             <div className="modal__header">
@@ -767,7 +1089,7 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {settingsModal && (
+      {!isGuest && settingsModal && (
         <div className="modal-overlay" onClick={() => setSettingsModal(null)}>
           <div className="modal modal--wide" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
             <div className="modal__header">
@@ -841,7 +1163,7 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {tierSettingsModal && (
+      {!isGuest && tierSettingsModal && (
         <div className="modal-overlay" onClick={() => setTierSettingsModal(null)}>
           <div className="modal modal--wide" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
             <div className="modal__header">
@@ -886,7 +1208,7 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {playerModal && (
+      {!isGuest && playerModal && (
         <div className="modal-overlay" onClick={() => setPlayerModal(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
             <div className="modal__header">
@@ -1036,7 +1358,7 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {deleteTarget && (
+      {!isGuest && deleteTarget && (
         <div className="modal-overlay" onClick={() => setDeleteTarget(null)}>
           <div className="modal modal--sm" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
             <div className="modal__header">
@@ -1061,14 +1383,124 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {showLogs && (
+      {!isGuest && showLogs && (
         <AdminLogsModal
           data={data}
           user={user}
-          isOwner={isOwner}
+          canUndoActions={canManageAdmins}
           onClose={() => setShowLogs(false)}
-          onDataChange={setData}
+          saveAppData={saveAppData}
+          onAdminsChange={() => setAdminAccounts(getManagedAdmins(data))}
+          onActiveTierlistChange={(removedTierlistId, newData) => {
+            if (activeId === removedTierlistId) {
+              setActiveId(newData.tierlists[0]?.id ?? 'overall')
+            }
+          }}
         />
+      )}
+
+      {!isGuest && editAdminModal && (
+        <div className="modal-overlay" onClick={() => setEditAdminModal(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="modal__header">
+              <h3>Edit Admin Account</h3>
+              <button
+                type="button"
+                className="modal__close"
+                onClick={() => setEditAdminModal(null)}
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleSaveEditAdmin}>
+              {editAdminModal.error && (
+                <div className="dashboard-message dashboard-message--error" role="alert">
+                  {editAdminModal.error}
+                </div>
+              )}
+              <div className="modal__field">
+                <label htmlFor="edit-admin-user">Username</label>
+                <input
+                  id="edit-admin-user"
+                  type="text"
+                  value={editAdminModal.username}
+                  onChange={(e) =>
+                    setEditAdminModal((prev) => ({
+                      ...prev,
+                      username: e.target.value,
+                      error: '',
+                    }))
+                  }
+                  autoFocus
+                />
+              </div>
+              <div className="modal__field">
+                <label htmlFor="edit-admin-pass">Password</label>
+                <input
+                  id="edit-admin-pass"
+                  type="password"
+                  value={editAdminModal.password}
+                  onChange={(e) =>
+                    setEditAdminModal((prev) => ({
+                      ...prev,
+                      password: e.target.value,
+                      error: '',
+                    }))
+                  }
+                />
+              </div>
+              <div className="modal__actions">
+                <button
+                  type="button"
+                  className="modal-btn modal-btn--ghost"
+                  onClick={() => setEditAdminModal(null)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="modal-btn modal-btn--primary">
+                  Save
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {!isGuest && deleteAdminTarget && (
+        <div className="modal-overlay" onClick={() => setDeleteAdminTarget(null)}>
+          <div className="modal modal--sm" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="modal__header">
+              <h3>Delete Admin Account</h3>
+              <button
+                type="button"
+                className="modal__close"
+                onClick={() => setDeleteAdminTarget(null)}
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="modal__text">
+              Are you sure you want to delete this admin account?
+            </p>
+            <p className="modal__text">
+              <strong>{deleteAdminTarget.username}</strong> will no longer be able to log in.
+            </p>
+            <div className="modal__actions">
+              <button
+                type="button"
+                className="modal-btn modal-btn--ghost"
+                onClick={() => setDeleteAdminTarget(null)}
+              >
+                Cancel
+              </button>
+              <button type="button" className="modal-btn modal-btn--danger" onClick={handleDeleteAdmin}>
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

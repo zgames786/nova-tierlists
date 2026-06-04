@@ -7,25 +7,33 @@ import {
   filterLogs,
   formatActionLabel,
   formatLogTime,
+  isUndoableLog,
 } from '../utils/activityLog'
-import { saveTierlists } from '../utils/tierlistsStorage'
+import {
+  applyUndo,
+  getUndoConfirmationMessage,
+  requiresUndoConfirmation,
+} from '../utils/undoAction'
 
 export default function AdminLogsModal({
   data,
   user,
-  isOwner,
+  canUndoActions,
   onClose,
-  onDataChange,
+  saveAppData,
+  onAdminsChange,
+  onActiveTierlistChange,
 }) {
   const [filter, setFilter] = useState(LOG_FILTERS.ALL)
   const [confirmClear, setConfirmClear] = useState(false)
+  const [undoError, setUndoError] = useState('')
 
   const logs = useMemo(
     () => filterLogs(data.logs ?? [], filter),
     [data.logs, filter],
   )
 
-  const handleClearLogs = () => {
+  const handleClearLogs = async () => {
     if (!confirmClear) {
       setConfirmClear(true)
       return
@@ -40,11 +48,40 @@ export default function AdminLogsModal({
       details: `Logs cleared by ${user.username}`,
     })
 
-    const cleared = { ...data, logs: [entry] }
-    const saved = saveTierlists(cleared)
-    onDataChange(saved)
-    setConfirmClear(false)
-    onClose()
+    try {
+      await saveAppData({ ...data, logs: [entry] })
+      setConfirmClear(false)
+      onClose()
+    } catch {
+      setUndoError('Failed to clear logs in Firestore.')
+    }
+  }
+
+  const handleUndo = async (log) => {
+    setUndoError('')
+
+    if (requiresUndoConfirmation(log.actionType)) {
+      const confirmed = window.confirm(getUndoConfirmationMessage(log))
+      if (!confirmed) return
+    }
+
+    const result = applyUndo(data, log, user)
+    if (!result.success) {
+      setUndoError(result.error ?? 'Undo failed.')
+      return
+    }
+
+    try {
+      await saveAppData(result.data)
+      if (result.adminsChanged) {
+        onAdminsChange?.()
+      }
+      if (result.removedTierlistId) {
+        onActiveTierlistChange?.(result.removedTierlistId, result.data)
+      }
+    } catch {
+      setUndoError('Undo applied locally but failed to save to Firestore.')
+    }
   }
 
   return (
@@ -75,6 +112,12 @@ export default function AdminLogsModal({
           ))}
         </div>
 
+        {undoError && (
+          <div className="logs-undo-error" role="alert">
+            {undoError}
+          </div>
+        )}
+
         <div className="logs-table-wrap">
           <table className="logs-table">
             <thead>
@@ -84,24 +127,28 @@ export default function AdminLogsModal({
                 <th>Action</th>
                 <th>Target</th>
                 <th>Details</th>
+                {canUndoActions && <th>Undo</th>}
               </tr>
             </thead>
             <tbody>
               {logs.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="logs-empty">
+                  <td colSpan={canUndoActions ? 6 : 5} className="logs-empty">
                     No logs for this filter.
                   </td>
                 </tr>
               )}
               {logs.map((log) => (
-                <tr key={log.id}>
+                <tr key={log.id} className={log.undone ? 'logs-row--undone' : ''}>
                   <td>{formatLogTime(log.timestamp)}</td>
                   <td>
                     <span className="logs-admin">{log.adminUsername}</span>
                     <span className="logs-role">{log.adminRole}</span>
                   </td>
-                  <td>{formatActionLabel(log.actionType)}</td>
+                  <td>
+                    {formatActionLabel(log.actionType)}
+                    {log.undone && <span className="logs-undone-badge">Undone</span>}
+                  </td>
                   <td>
                     {log.targetName || '—'}
                     {log.targetType && (
@@ -109,6 +156,23 @@ export default function AdminLogsModal({
                     )}
                   </td>
                   <td>{log.details}</td>
+                  {canUndoActions && (
+                    <td>
+                      {isUndoableLog(log) ? (
+                        <button
+                          type="button"
+                          className="logs-undo-btn"
+                          onClick={() => handleUndo(log)}
+                        >
+                          Undo
+                        </button>
+                      ) : log.undone ? (
+                        <span className="logs-undone-label">Undone</span>
+                      ) : (
+                        <span className="logs-undo-na">—</span>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -116,7 +180,7 @@ export default function AdminLogsModal({
         </div>
 
         <div className="modal__actions">
-          {isOwner && (
+          {canUndoActions && (
             <button
               type="button"
               className={`modal-btn${confirmClear ? ' modal-btn--danger' : ' modal-btn--ghost'}`}

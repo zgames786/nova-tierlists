@@ -1,38 +1,42 @@
 import { useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { useAppData } from '../context/AppDataContext'
 import { useAuth } from '../context/AuthContext'
 import { ACTION_TYPES, appendLog, createLogEntry } from '../utils/activityLog'
-import { loadTierlists, saveTierlists } from '../utils/tierlistsStorage'
 import './AdminLogin.css'
 
 export default function AdminLogin() {
   const navigate = useNavigate()
+  const { data, saveAppData } = useAppData()
   const { login, isAuthenticated } = useAuth()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
 
   if (isAuthenticated) {
-    return <Navigate to="/admin/dashboard" replace />
+    return <Navigate to="/rankings" replace />
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
 
-    const result = login(username, password)
+    const result = login(username, password, data)
     if (result.success) {
-      const data = loadTierlists()
-      const entry = createLogEntry({
-        adminUsername: result.user.username,
-        adminRole: result.user.role,
-        actionType: ACTION_TYPES.ADMIN_LOGIN,
-        targetType: 'session',
-        targetName: result.user.username,
-        details: `${result.user.username} logged in`,
-      })
-      saveTierlists(appendLog(data, entry))
-      navigate('/admin/dashboard')
+      try {
+        const entry = createLogEntry({
+          adminUsername: result.user.username,
+          adminRole: result.user.role,
+          actionType: ACTION_TYPES.ADMIN_LOGIN,
+          targetType: 'session',
+          targetName: result.user.username,
+          details: `${result.user.username} logged in`,
+        })
+        await saveAppData(appendLog(data, entry))
+        navigate('/rankings')
+      } catch {
+        setError('Logged in, but failed to save login log to Firestore.')
+      }
     } else {
       setError(result.error)
     }
