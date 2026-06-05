@@ -24,7 +24,6 @@ export const ACTION_TYPES = {
   SUGGESTION_DELETED: 'SUGGESTION_DELETED',
   TIERLIST_PLAYER_RANK_UPDATED: 'TIERLIST_PLAYER_RANK_UPDATED',
   TIERLIST_PLAYER_MOVED: 'TIERLIST_PLAYER_MOVED',
-  SNAPSHOT_RESTORED: 'SNAPSHOT_RESTORED',
   BACKUP_EXPORTED: 'BACKUP_EXPORTED',
   BACKUP_IMPORTED: 'BACKUP_IMPORTED',
   LOGS_CLEARED: 'LOGS_CLEARED',
@@ -56,7 +55,6 @@ export const LOG_FILTERS = {
   TIERLISTS: 'tierlists',
   ADMINS: 'admins',
   SUGGESTIONS: 'suggestions',
-  SNAPSHOTS: 'snapshots',
   BACKUP: 'backup',
   LOGIN: 'login',
 }
@@ -94,7 +92,6 @@ const FILTER_ACTION_MAP = {
     ACTION_TYPES.SUGGESTION_REJECTED,
     ACTION_TYPES.SUGGESTION_DELETED,
   ],
-  [LOG_FILTERS.SNAPSHOTS]: [ACTION_TYPES.SNAPSHOT_RESTORED],
   [LOG_FILTERS.BACKUP]: [ACTION_TYPES.BACKUP_EXPORTED, ACTION_TYPES.BACKUP_IMPORTED],
   [LOG_FILTERS.LOGIN]: [ACTION_TYPES.ADMIN_LOGIN, ACTION_TYPES.ADMIN_LOGOUT],
 }
@@ -172,23 +169,4 @@ export function formatLogTime(iso) {
 
 export function formatActionLabel(actionType) {
   return actionType.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
-}
-
-export const SNAPSHOT_TRIGGERS = {
-  ADMIN_CREATED: 'admin_created',
-  ADMIN_UPDATED: 'admin_updated',
-  ADMIN_DELETED: 'admin_deleted',
-  TIERLIST_CREATED: 'tierlist_created',
-  TIERLIST_DELETED: 'tierlist_deleted',
-  TIERLIST_RENAMED: 'tierlist_renamed',
-  POINT_SYSTEM_UPDATED: 'point_system_updated',
-  PLAYER_CREATED: 'player_created',
-  PLAYER_UPDATED: 'player_updated',
-  PLAYER_DELETED: 'player_deleted',
-  TIERLIST_RANK_CHANGED: 'tierlist_rank_changed',
-  PLAYER_MOVED: 'player_moved',
-  SUGGESTION_STATUS_CHANGED: 'suggestion_status_changed',
-  IMPORT_DATA: 'import_data',
-  UNDO_ACTION: 'undo_action',
-  MANUAL: 'manual',
 }

@@ -1582,39 +1582,6 @@
   cursor: default;
 }
 
-.snapshots-modal .snapshots-actions {
-  margin-bottom: 1rem;
-}
-
-.snapshots-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  max-height: 360px;
-  overflow-y: auto;
-}
-
-.snapshot-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.75rem;
-  background: rgba(15, 10, 35, 0.45);
-  border-radius: 8px;
-}
-
-.snapshot-row__info {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.85rem;
-}
-
-.snapshot-row__info span {
-  color: rgba(196, 181, 253, 0.65);
-}
-
 @media (max-width: 640px) {
   .dashboard-nav {
     padding: 0.75rem 1rem;

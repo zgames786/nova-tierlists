@@ -8,7 +8,6 @@ import {
   subscribeAppData,
 } from '../utils/appDataFirestore'
 import { canWriteFirestore, isAdminUser, isGuest } from '../utils/adminAuth'
-import { createSnapshot } from '../utils/snapshotsFirestore'
 import {
   createSuggestionInFirestore,
   deleteSuggestionFromFirestore,
@@ -73,9 +72,8 @@ export function AppDataProvider({ children }) {
   }, [isAdmin])
 
   const saveAppData = useCallback(
-    async (newData, options = {}) => {
+    async (newData) => {
       const prepared = prepareAppData(newData)
-      const { snapshotTrigger, snapshotLabel, skipSnapshot = false } = options
 
       if (isGuest(user)) {
         setData(prepared)
@@ -89,14 +87,6 @@ export function AppDataProvider({ children }) {
       setSaving(true)
       setError(null)
       try {
-        if (!skipSnapshot && snapshotTrigger && data) {
-          await createSnapshot(data, {
-            createdBy: user?.username ?? 'unknown',
-            trigger: snapshotTrigger,
-            label: snapshotLabel ?? snapshotTrigger,
-          })
-        }
-
         const saved = await saveAppDataToFirestore(prepared)
         setData(saved)
         return saved
@@ -106,13 +96,13 @@ export function AppDataProvider({ children }) {
         setSaving(false)
       }
     },
-    [user, data],
+    [user],
   )
 
   const appendAppLog = useCallback(
     async (logEntry) => {
       if (!logEntry || isGuest(user) || !data) return data
-      return saveAppData(appendLog(data, logEntry), { skipSnapshot: true })
+      return saveAppData(appendLog(data, logEntry))
     },
     [user, data, saveAppData],
   )

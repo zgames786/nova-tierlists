@@ -35,16 +35,3 @@ export function snapshotTierlistForCreate(tierlist) {
     players: snapshotPlayers(tierlist.players),
   }
 }
-
-export function snapshotAdmin(admin) {
-  if (!admin) return null
-  return {
-    id: admin.id,
-    username: admin.username,
-    password: admin.password,
-    role: admin.role ?? 'admin',
-    createdAt: admin.createdAt,
-    createdBy: admin.createdBy,
-    updatedAt: admin.updatedAt,
-  }
-}

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Camera,
   ChevronDown,
   ChevronUp,
   Download,
@@ -17,20 +16,13 @@ import {
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import AdminLogsModal from '../components/AdminLogsModal'
-import SnapshotsModal from '../components/SnapshotsModal'
 import SmpPlayerListSection from '../components/SmpPlayerListSection'
 import SuggestionsSection from '../components/SuggestionsSection'
 import { useAppData } from '../context/AppDataContext'
 import { useAuth } from '../context/AuthContext'
 import { AUTH_EMAIL_DOMAIN, clearOldLocalAdmins } from '../utils/adminAuth'
 import { getManagedAdmins } from '../utils/adminStorage'
-import {
-  ACTION_TYPES,
-  appendLog,
-  createLogEntry,
-  formatLogTime,
-  SNAPSHOT_TRIGGERS,
-} from '../utils/activityLog'
+import { ACTION_TYPES, appendLog, createLogEntry } from '../utils/activityLog'
 import {
   BACKUP_FILENAME,
   buildBackupPayload,
@@ -48,7 +40,6 @@ import {
   snapshotTierlistForCreate,
 } from '../utils/logSnapshots'
 import { buildRankedPlayerRows } from '../utils/rankingDisplay'
-import { restoreSnapshot } from '../utils/snapshotsFirestore'
 import {
   TIERS,
   TIER_COLORS,
@@ -109,7 +100,6 @@ export default function AdminDashboard() {
 
   const [playerModal, setPlayerModal] = useState(null)
   const [showLogs, setShowLogs] = useState(false)
-  const [showSnapshots, setShowSnapshots] = useState(false)
   const [importError, setImportError] = useState('')
 
   const [clearLegacyMessage, setClearLegacyMessage] = useState({ type: '', text: '' })
@@ -162,9 +152,9 @@ export default function AdminDashboard() {
       canUndo,
     })
 
-  const logAndSave = async (newData, entry, snapshotTrigger) => {
+  const logAndSave = async (newData, entry) => {
     const withLog = entry ? appendLog(newData, entry) : newData
-    return saveAppData(withLog, snapshotTrigger ? { snapshotTrigger } : {})
+    return saveAppData(withLog)
   }
 
   const handleLogout = async () => {
@@ -245,7 +235,6 @@ export default function AdminDashboard() {
           targetName: file.name,
           details: 'Imported backup and replaced app data in Firestore',
         }),
-        SNAPSHOT_TRIGGERS.IMPORT_DATA,
       )
       if (payload.suggestions?.length) {
         await importSuggestions(payload.suggestions)
@@ -287,7 +276,6 @@ export default function AdminDashboard() {
         },
         afterState: {},
       }),
-      SNAPSHOT_TRIGGERS.TIERLIST_DELETED,
     )
     setActiveId(OVERALL_ID)
   }
@@ -312,7 +300,6 @@ export default function AdminDashboard() {
           },
           canUndo: true,
         }),
-        SNAPSHOT_TRIGGERS.TIERLIST_CREATED,
       )
       setActiveId(result.tierlist.id)
       setNewTierlistName('')
@@ -360,7 +347,6 @@ export default function AdminDashboard() {
           },
           canUndo: true,
         }),
-        SNAPSHOT_TRIGGERS.POINT_SYSTEM_UPDATED,
       )
       setTierSettingsModal(null)
     }
@@ -387,7 +373,6 @@ export default function AdminDashboard() {
             afterState: { tierlistId: activeTierlist.id, name: newName },
             canUndo: true,
           }),
-          SNAPSHOT_TRIGGERS.TIERLIST_RENAMED,
         )
       } else {
         await logAndSave(result.data)
@@ -462,7 +447,6 @@ export default function AdminDashboard() {
           },
           canUndo: true,
         }),
-        SNAPSHOT_TRIGGERS.TIERLIST_RANK_CHANGED,
       )
       setPlayerModal(null)
     }
@@ -493,7 +477,6 @@ export default function AdminDashboard() {
           },
           canUndo: true,
         }),
-        SNAPSHOT_TRIGGERS.PLAYER_MOVED,
       )
     }
   }
@@ -547,10 +530,6 @@ export default function AdminDashboard() {
       manualTier,
       points: getDefaultPoints(activeTierlist, manualTier),
     }))
-  }
-
-  const handleSmpSave = async (newData, entry, snapshotTrigger) => {
-    await logAndSave(newData, entry, snapshotTrigger)
   }
 
   const smpPlayerLogHandlers = {
@@ -632,19 +611,6 @@ export default function AdminDashboard() {
       }),
   }
 
-  const handleRestoreSnapshot = async (snapshot) => {
-    const restored = await restoreSnapshot(snapshot)
-    await logAndSave(
-      restored,
-      makeLog({
-        actionType: ACTION_TYPES.SNAPSHOT_RESTORED,
-        targetType: 'snapshot',
-        targetName: snapshot.label ?? snapshot.trigger,
-        details: `Restored snapshot from ${formatLogTime(snapshot.createdAt)}`,
-      }),
-    )
-  }
-
   return (
     <div className="dashboard">
       <nav className="dashboard-nav">
@@ -697,16 +663,6 @@ export default function AdminDashboard() {
                 <ScrollText size={16} />
                 Logs
               </button>
-              {isOwner && (
-                <button
-                  type="button"
-                  className="dashboard-nav__link dashboard-nav__btn"
-                  onClick={() => setShowSnapshots(true)}
-                >
-                  <Camera size={16} />
-                  Snapshots
-                </button>
-              )}
               <button
                 type="button"
                 className="dashboard-nav__link dashboard-nav__btn"
@@ -976,19 +932,7 @@ export default function AdminDashboard() {
             data={data}
             canManage={!isGuest}
             user={user}
-            onSave={(newData, entry) =>
-              handleSmpSave(
-                newData,
-                entry,
-                entry?.actionType === ACTION_TYPES.PLAYER_CREATED
-                  ? SNAPSHOT_TRIGGERS.PLAYER_CREATED
-                  : entry?.actionType === ACTION_TYPES.PLAYER_UPDATED
-                    ? SNAPSHOT_TRIGGERS.PLAYER_UPDATED
-                    : entry?.actionType === ACTION_TYPES.PLAYER_DELETED
-                      ? SNAPSHOT_TRIGGERS.PLAYER_DELETED
-                      : null,
-              )
-            }
+            onSave={(newData, entry) => logAndSave(newData, entry)}
             onLog={smpPlayerLogHandlers}
           />
 
@@ -1330,15 +1274,6 @@ export default function AdminDashboard() {
             </form>
           </div>
         </div>
-      )}
-
-      {isOwner && showSnapshots && (
-        <SnapshotsModal
-          data={data}
-          user={user}
-          onClose={() => setShowSnapshots(false)}
-          onRestore={handleRestoreSnapshot}
-        />
       )}
 
       {!isGuest && showLogs && (
