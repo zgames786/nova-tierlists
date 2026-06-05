@@ -395,7 +395,7 @@ export default function AdminDashboard() {
     })
   }
 
-  const handleSavePlayer = async (e) => {
+  const handleSavePlayer = (e) => {
     e.preventDefault()
     if (!playerModal || !activeTierlist) return
 
@@ -412,73 +412,75 @@ export default function AdminDashboard() {
       payload,
     )
 
-    if (result.success) {
-      const tier = getEffectiveTier({
-        tierMode: playerModal.tierMode,
-        manualTier: playerModal.manualTier,
-        autoTier: playerModal.previewAutoTier,
-      })
-      const points = Number(playerModal.points)
-      const playerName = playerModal.playerName
-      const updatedTierlist = result.data.tierlists.find(
-        (tierlist) => tierlist.id === activeTierlist.id,
-      )
-      const beforePlayer = activeTierlist.players.find(
-        (player) => player.id === playerModal.playerId,
-      )
-      const afterPlayer = updatedTierlist.players.find(
-        (player) => player.id === playerModal.playerId,
-      )
+    if (!result.success) return
 
-      await logAndSave(
-        result.data,
-        makeLog({
-          actionType: ACTION_TYPES.TIERLIST_PLAYER_RANK_UPDATED,
-          targetType: 'player',
-          targetName: playerName,
-          details: `Updated ${playerName} on ${activeTierlist.name} (tier ${tier}, ${points} points)`,
-          beforeState: {
-            tierlistId: activeTierlist.id,
-            player: snapshotPlayer(beforePlayer),
-          },
-          afterState: {
-            tierlistId: activeTierlist.id,
-            player: snapshotPlayer(afterPlayer),
-          },
-          canUndo: true,
-        }),
-      )
-      setPlayerModal(null)
-    }
+    const tier = getEffectiveTier({
+      tierMode: playerModal.tierMode,
+      manualTier: playerModal.manualTier,
+      autoTier: playerModal.previewAutoTier,
+    })
+    const points = Number(playerModal.points)
+    const playerName = playerModal.playerName
+    const updatedTierlist = result.data.tierlists.find(
+      (tierlist) => tierlist.id === activeTierlist.id,
+    )
+    const beforePlayer = activeTierlist.players.find(
+      (player) => player.id === playerModal.playerId,
+    )
+    const afterPlayer = updatedTierlist.players.find(
+      (player) => player.id === playerModal.playerId,
+    )
+
+    setPlayerModal(null)
+
+    void logAndSave(
+      result.data,
+      makeLog({
+        actionType: ACTION_TYPES.TIERLIST_PLAYER_RANK_UPDATED,
+        targetType: 'player',
+        targetName: playerName,
+        details: `Updated ${playerName} on ${activeTierlist.name} (tier ${tier}, ${points} points)`,
+        beforeState: {
+          tierlistId: activeTierlist.id,
+          player: snapshotPlayer(beforePlayer),
+        },
+        afterState: {
+          tierlistId: activeTierlist.id,
+          player: snapshotPlayer(afterPlayer),
+        },
+        canUndo: true,
+      }),
+    )
   }
 
-  const handleMove = async (playerId, direction) => {
+  const handleMove = (playerId, direction) => {
     const beforeTierlist = data.tierlists.find((tierlist) => tierlist.id === activeTierlist.id)
     const result = movePlayer(data, activeTierlist.id, playerId, direction)
-    if (result.success) {
-      const moved = result.moved
-      const afterTierlist = result.data.tierlists.find(
-        (tierlist) => tierlist.id === activeTierlist.id,
-      )
-      await logAndSave(
-        result.data,
-        makeLog({
-          actionType: ACTION_TYPES.TIERLIST_PLAYER_MOVED,
-          targetType: 'player',
-          targetName: moved?.name ?? '',
-          details: `Moved ${moved?.name ?? 'player'} ${direction} on ${activeTierlist.name}`,
-          beforeState: {
-            tierlistId: activeTierlist.id,
-            players: snapshotPlayers(beforeTierlist.players),
-          },
-          afterState: {
-            tierlistId: activeTierlist.id,
-            players: snapshotPlayers(afterTierlist.players),
-          },
-          canUndo: true,
-        }),
-      )
-    }
+    if (!result.success) return
+
+    const moved = result.moved
+    const afterTierlist = result.data.tierlists.find(
+      (tierlist) => tierlist.id === activeTierlist.id,
+    )
+
+    void logAndSave(
+      result.data,
+      makeLog({
+        actionType: ACTION_TYPES.TIERLIST_PLAYER_MOVED,
+        targetType: 'player',
+        targetName: moved?.name ?? '',
+        details: `Moved ${moved?.name ?? 'player'} ${direction} on ${activeTierlist.name}`,
+        beforeState: {
+          tierlistId: activeTierlist.id,
+          players: snapshotPlayers(beforeTierlist.players),
+        },
+        afterState: {
+          tierlistId: activeTierlist.id,
+          players: snapshotPlayers(afterTierlist.players),
+        },
+        canUndo: true,
+      }),
+    )
   }
 
   const handleClearOldAdmins = async () => {
@@ -705,7 +707,7 @@ export default function AdminDashboard() {
 
       {saving && !isGuest && (
         <div className="dashboard-saving-banner" role="status">
-          Saving to Firestore…
+          Saving…
         </div>
       )}
 

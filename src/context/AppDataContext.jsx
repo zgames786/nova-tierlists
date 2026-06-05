@@ -28,8 +28,16 @@ export function AppDataProvider({ children }) {
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
   const migrationAttempted = useRef(false)
+  const dataRef = useRef(null)
+  const pendingSavesRef = useRef(0)
+  const saveGenerationRef = useRef(0)
+  const writeQueueRef = useRef(Promise.resolve())
 
   const isAdmin = isAdminUser(user)
+
+  useEffect(() => {
+    dataRef.current = data
+  }, [data])
 
   useEffect(() => {
     setLoading(true)
@@ -37,6 +45,10 @@ export function AppDataProvider({ children }) {
 
     const unsubscribe = subscribeAppData(
       (appData) => {
+        if (pendingSavesRef.current > 0) {
+          return
+        }
+        dataRef.current = appData
         setData(appData)
         setLoading(false)
         setError(null)
@@ -72,39 +84,63 @@ export function AppDataProvider({ children }) {
   }, [isAdmin])
 
   const saveAppData = useCallback(
-    async (newData) => {
+    (newData) => {
       const prepared = prepareAppData(newData)
 
       if (isGuest(user)) {
+        dataRef.current = prepared
         setData(prepared)
-        return prepared
+        return Promise.resolve(prepared)
       }
 
       if (!canWriteFirestore(user)) {
-        throw new Error('You must be signed in with Firebase Auth to save changes.')
+        return Promise.reject(new Error('You must be signed in with Firebase Auth to save changes.'))
       }
+
+      const saveId = ++saveGenerationRef.current
+      const rollbackData = dataRef.current
+      pendingSavesRef.current += 1
 
       setSaving(true)
       setError(null)
-      try {
-        const saved = await saveAppDataToFirestore(prepared)
-        setData(saved)
-        return saved
-      } catch (saveError) {
-        throw saveError
-      } finally {
-        setSaving(false)
-      }
+      dataRef.current = prepared
+      setData(prepared)
+
+      writeQueueRef.current = writeQueueRef.current.then(async () => {
+        try {
+          const saved = await saveAppDataToFirestore(prepared)
+          if (saveId === saveGenerationRef.current) {
+            dataRef.current = saved
+            setData(saved)
+          }
+        } catch (saveError) {
+          if (saveId === saveGenerationRef.current) {
+            dataRef.current = rollbackData
+            setData(rollbackData)
+          }
+          setError(saveError?.message ?? 'Failed to save to Firestore.')
+        } finally {
+          pendingSavesRef.current -= 1
+          if (pendingSavesRef.current <= 0) {
+            pendingSavesRef.current = 0
+            setSaving(false)
+          }
+        }
+      })
+
+      return Promise.resolve(prepared)
     },
     [user],
   )
 
   const appendAppLog = useCallback(
-    async (logEntry) => {
-      if (!logEntry || isGuest(user) || !data) return data
-      return saveAppData(appendLog(data, logEntry))
+    (logEntry) => {
+      if (!logEntry || isGuest(user) || !dataRef.current) {
+        return Promise.resolve(dataRef.current)
+      }
+      return saveAppData(appendLog(dataRef.current, logEntry))
     },
-    [user, data, saveAppData],
+    [user, saveAppData],
   )
 
   const submitSuggestion = useCallback(
@@ -123,7 +159,9 @@ export function AppDataProvider({ children }) {
         setError(message)
         throw submitError
       } finally {
-        setSaving(false)
+        if (pendingSavesRef.current <= 0) {
+          setSaving(false)
+        }
       }
     },
     [isAdmin, appendAppLog],
@@ -157,7 +195,9 @@ export function AppDataProvider({ children }) {
         setError(message)
         throw updateError
       } finally {
-        setSaving(false)
+        if (pendingSavesRef.current <= 0) {
+          setSaving(false)
+        }
       }
     },
     [isAdmin, suggestions],
@@ -184,7 +224,9 @@ export function AppDataProvider({ children }) {
         setError(message)
         throw deleteError
       } finally {
-        setSaving(false)
+        if (pendingSavesRef.current <= 0) {
+          setSaving(false)
+        }
       }
     },
     [isAdmin, suggestions],
@@ -205,6 +247,7 @@ export function AppDataProvider({ children }) {
     setError(null)
     try {
       const loaded = await loadAppData()
+      dataRef.current = loaded
       setData(loaded)
       return loaded
     } catch (loadError) {
