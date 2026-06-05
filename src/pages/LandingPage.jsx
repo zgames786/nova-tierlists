@@ -19,8 +19,8 @@ export default function LandingPage() {
   const navigate = useNavigate()
   const { enterGuest } = useAuth()
 
-  const handleContinueAsGuest = () => {
-    enterGuest()
+  const handleContinueAsGuest = async () => {
+    await enterGuest()
     navigate('/rankings')
   }
 

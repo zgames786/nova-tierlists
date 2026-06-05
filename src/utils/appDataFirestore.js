@@ -12,14 +12,12 @@ function serializeForFirestore(data) {
   return JSON.parse(JSON.stringify(prepareAppData(data)))
 }
 
+/** Read app data only — never writes (safe for guests and pre-login). */
 export async function loadAppData() {
   const snapshot = await getDoc(appDataRef)
 
   if (!snapshot.exists()) {
-    const defaults = createDefaultAppData()
-    const prepared = serializeForFirestore(defaults)
-    await setDoc(appDataRef, prepared)
-    return prepared
+    return prepareAppData(createDefaultAppData())
   }
 
   return prepareAppData(snapshot.data())
@@ -49,9 +47,7 @@ export function subscribeAppData(onData, onError) {
     (snapshot) => {
       try {
         if (!snapshot.exists()) {
-          loadAppData()
-            .then(onData)
-            .catch((error) => onError?.(error))
+          onData(prepareAppData(createDefaultAppData()))
           return
         }
         onData(prepareAppData(snapshot.data()))

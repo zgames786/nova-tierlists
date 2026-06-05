@@ -360,6 +360,29 @@ export function createTierlist(data, name) {
   return { success: true, data: next, tierlist }
 }
 
+export function deleteTierlist(data, tierlistId) {
+  const rejected = rejectOverallMutation(tierlistId)
+  if (rejected) {
+    return { success: false, error: 'The Overall tierlist cannot be deleted.' }
+  }
+
+  const tierlist = data.tierlists.find((t) => t.id === tierlistId)
+  if (!tierlist) {
+    return { success: false, error: 'Tierlist not found.' }
+  }
+
+  if (isOverallTierlist(tierlist)) {
+    return { success: false, error: 'The Overall tierlist cannot be deleted.' }
+  }
+
+  const next = persist({
+    ...data,
+    tierlists: data.tierlists.filter((t) => t.id !== tierlistId),
+  })
+
+  return { success: true, data: next, tierlist }
+}
+
 export function updateTierlistSettings(data, tierlistId, settings) {
   const tierlist = data.tierlists.find((t) => t.id === tierlistId)
   if (!tierlist) {

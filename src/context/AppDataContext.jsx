@@ -7,7 +7,7 @@ import {
   saveAppData as saveAppDataToFirestore,
   subscribeAppData,
 } from '../utils/appDataFirestore'
-import { isGuest } from '../utils/adminAuth'
+import { canWriteFirestore, isGuest } from '../utils/adminAuth'
 import { createSnapshot } from '../utils/snapshotsFirestore'
 
 const AppDataContext = createContext(null)
@@ -48,6 +48,10 @@ export function AppDataProvider({ children }) {
         return prepared
       }
 
+      if (!canWriteFirestore(user)) {
+        throw new Error('You must be signed in with Firebase Auth to save changes.')
+      }
+
       setSaving(true)
       setError(null)
       try {
@@ -63,9 +67,6 @@ export function AppDataProvider({ children }) {
         setData(saved)
         return saved
       } catch (saveError) {
-        const message =
-          saveError?.message ?? 'Failed to save NovaSMP data to Firestore.'
-        setError(message)
         throw saveError
       } finally {
         setSaving(false)

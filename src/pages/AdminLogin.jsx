@@ -8,37 +8,49 @@ import './AdminLogin.css'
 export default function AdminLogin() {
   const navigate = useNavigate()
   const { data, saveAppData } = useAppData()
-  const { login, isAuthenticated } = useAuth()
+  const { login, isAuthenticated, isGuest, authLoading } = useAuth()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
-  if (isAuthenticated) {
+  if (authLoading) {
+    return null
+  }
+
+  if (isAuthenticated && !isGuest && !submitting) {
     return <Navigate to="/rankings" replace />
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
+    setSubmitting(true)
 
-    const result = login(username, password, data)
-    if (result.success) {
-      try {
-        const entry = createLogEntry({
-          adminUsername: result.user.username,
-          adminRole: result.user.role,
-          actionType: ACTION_TYPES.ADMIN_LOGIN,
-          targetType: 'session',
-          targetName: result.user.username,
-          details: `${result.user.username} logged in`,
-        })
-        await saveAppData(appendLog(data, entry))
-        navigate('/rankings')
-      } catch {
-        setError('Logged in, but failed to save login log to Firestore.')
+    try {
+      const result = await login(username, password)
+      if (result.success) {
+        try {
+          if (data) {
+            const entry = createLogEntry({
+              adminUsername: result.user.username,
+              adminRole: result.user.role,
+              actionType: ACTION_TYPES.ADMIN_LOGIN,
+              targetType: 'session',
+              targetName: result.user.username,
+              details: `${result.user.username} logged in`,
+            })
+            await saveAppData(appendLog(data, entry))
+          }
+          navigate('/rankings')
+        } catch {
+          navigate('/rankings')
+        }
+      } else {
+        setError(result.error)
       }
-    } else {
-      setError(result.error)
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -87,8 +99,8 @@ export default function AdminLogin() {
             />
           </div>
 
-          <button type="submit" className="admin-login__submit">
-            Login
+          <button type="submit" className="admin-login__submit" disabled={submitting}>
+            {submitting ? 'Signing in…' : 'Login'}
           </button>
         </form>
       </div>

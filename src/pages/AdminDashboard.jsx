@@ -22,13 +22,15 @@ import SmpPlayerListSection from '../components/SmpPlayerListSection'
 import SuggestionsSection from '../components/SuggestionsSection'
 import { useAppData } from '../context/AppDataContext'
 import { useAuth } from '../context/AuthContext'
-import {
-  createAdminAccount,
-  deleteAdminAccount,
-  updateAdminAccount,
-} from '../utils/adminAuth'
+import { AUTH_EMAIL_DOMAIN, clearOldLocalAdmins } from '../utils/adminAuth'
 import { getManagedAdmins } from '../utils/adminStorage'
-import { ACTION_TYPES, appendLog, createLogEntry, formatLogTime, SNAPSHOT_TRIGGERS } from '../utils/activityLog'
+import {
+  ACTION_TYPES,
+  appendLog,
+  createLogEntry,
+  formatLogTime,
+  SNAPSHOT_TRIGGERS,
+} from '../utils/activityLog'
 import {
   BACKUP_FILENAME,
   buildBackupPayload,
@@ -39,9 +41,7 @@ import {
   parseBackupFile,
   validateBackupPayload,
 } from '../utils/backup'
-import { findAdminById } from '../utils/adminStorage'
 import {
-  snapshotAdmin,
   snapshotPlayer,
   snapshotPlayers,
   snapshotPointSystem,
@@ -54,6 +54,7 @@ import {
   TIER_COLORS,
   DEFAULT_TIER,
   createTierlist,
+  deleteTierlist,
   getAutoTierForPosition,
   getAutoTierRangesLabel,
   getDefaultPoints,
@@ -61,6 +62,7 @@ import {
   getPointSystem,
   isOverallTierlist,
   movePlayer,
+  OVERALL_ID,
   resolvePlayerDisplay,
   updateTierlistPlayerRank,
   updatePointSystem,
@@ -70,7 +72,7 @@ import './AdminDashboard.css'
 
 export default function AdminDashboard() {
   const navigate = useNavigate()
-  const { user, logout, isGuest, canManageAdmins, isOwner } = useAuth()
+  const { user, logout, exitGuest, isGuest, canManageAdmins, isOwner } = useAuth()
   const { data, saveAppData, submitSuggestion, saving, error: dataError } = useAppData()
   const importInputRef = useRef(null)
 
@@ -99,18 +101,9 @@ export default function AdminDashboard() {
   const [showSnapshots, setShowSnapshots] = useState(false)
   const [importError, setImportError] = useState('')
 
-  const [newUsername, setNewUsername] = useState('')
-  const [newPassword, setNewPassword] = useState('')
-  const [createMessage, setCreateMessage] = useState({ type: '', text: '' })
-  const [adminAccounts, setAdminAccounts] = useState([])
-  const [editAdminModal, setEditAdminModal] = useState(null)
-  const [deleteAdminTarget, setDeleteAdminTarget] = useState(null)
+  const [clearLegacyMessage, setClearLegacyMessage] = useState({ type: '', text: '' })
 
-  useEffect(() => {
-    if (canManageAdmins && data) {
-      setAdminAccounts(getManagedAdmins(data))
-    }
-  }, [canManageAdmins, data])
+  const hasLegacyAdmins = getManagedAdmins(data).length > 0
 
   const activeTierlist = data?.tierlists?.find((t) => t.id === activeId) ?? data?.tierlists?.[0]
   const isOverallViewEarly = activeTierlist ? isOverallTierlist(activeTierlist) : false
@@ -169,12 +162,12 @@ export default function AdminDashboard() {
     } catch {
       /* still sign out if log save fails */
     }
-    logout()
+    await logout()
     navigate('/')
   }
 
   const handleExit = () => {
-    logout()
+    exitGuest()
     navigate('/')
   }
 
@@ -242,12 +235,41 @@ export default function AdminDashboard() {
       } else {
         setActiveId(saved.tierlists[0]?.id ?? 'overall')
       }
-      if (canManageAdmins) {
-        setAdminAccounts(getManagedAdmins(saved))
-      }
     } catch (err) {
       setImportError(err.message ?? 'Import failed.')
     }
+  }
+
+  const handleDeleteTierlist = async () => {
+    if (!activeTierlist || isOverallView || !isOwner) return
+
+    if (
+      !window.confirm(
+        `Delete tierlist "${activeTierlist.name}"? This cannot be undone.`,
+      )
+    ) {
+      return
+    }
+
+    const result = deleteTierlist(data, activeTierlist.id)
+    if (!result.success) return
+
+    await logAndSave(
+      result.data,
+      makeLog({
+        actionType: ACTION_TYPES.TIERLIST_DELETED,
+        targetType: 'tierlist',
+        targetName: result.tierlist.name,
+        details: `Deleted tierlist "${result.tierlist.name}"`,
+        beforeState: {
+          tierlistId: result.tierlist.id,
+          tierlist: snapshotTierlistForCreate(result.tierlist),
+        },
+        afterState: {},
+      }),
+      SNAPSHOT_TRIGGERS.TIERLIST_DELETED,
+    )
+    setActiveId(OVERALL_ID)
   }
 
   const handleCreateTierlist = async (e) => {
@@ -456,96 +478,34 @@ export default function AdminDashboard() {
     }
   }
 
-  const handleCreateAdmin = async (e) => {
-    e.preventDefault()
-    setCreateMessage({ type: '', text: '' })
-    const trimmed = newUsername.trim()
-    const result = createAdminAccount(newUsername, newPassword, user, data)
-    if (result.success) {
-      await logAndSave(
-        result.data,
-        makeLog({
-          actionType: ACTION_TYPES.ADMIN_CREATED,
-          targetType: 'admin',
-          targetName: trimmed,
-          details: `Owner ${user?.username} created admin account ${trimmed}`,
-          beforeState: null,
-          afterState: { admin: snapshotAdmin(result.admin) },
-          canUndo: true,
-        }),
-        SNAPSHOT_TRIGGERS.ADMIN_CREATED,
+  const handleClearOldAdmins = async () => {
+    setClearLegacyMessage({ type: '', text: '' })
+
+    if (
+      !window.confirm(
+        'Clear all legacy local admin records from Firestore? Firebase Auth accounts are not affected.',
       )
-      setAdminAccounts(getManagedAdmins(result.data))
-      setCreateMessage({ type: 'success', text: `Admin "${trimmed}" created.` })
-      setNewUsername('')
-      setNewPassword('')
-    } else {
-      setCreateMessage({ type: 'error', text: result.error })
+    ) {
+      return
     }
-  }
 
-  const openEditAdmin = (admin) => {
-    setEditAdminModal({
-      id: admin.id,
-      username: admin.username,
-      password: admin.password,
-    })
-  }
-
-  const handleSaveEditAdmin = async (e) => {
-    e.preventDefault()
-    if (!editAdminModal) return
-
-    const trimmed = editAdminModal.username.trim()
-    const beforeAdmin = findAdminById(data, editAdminModal.id)
-    const result = updateAdminAccount(
-      editAdminModal.id,
-      editAdminModal.username,
-      editAdminModal.password,
-      user,
-      data,
-    )
+    const result = clearOldLocalAdmins(user, data)
     if (result.success) {
       await logAndSave(
         result.data,
         makeLog({
-          actionType: ACTION_TYPES.ADMIN_UPDATED,
-          targetType: 'admin',
-          targetName: trimmed,
-          details: `Owner ${user?.username} updated admin account ${result.previousUsername ?? trimmed}`,
-          beforeState: { admin: snapshotAdmin(beforeAdmin) },
-          afterState: { admin: snapshotAdmin(result.admin) },
-          canUndo: true,
+          actionType: ACTION_TYPES.OLD_ADMINS_CLEARED,
+          targetType: 'admins',
+          targetName: 'legacy admins',
+          details: `Owner ${user?.username} cleared ${result.clearedCount} legacy admin record(s)`,
         }),
-        SNAPSHOT_TRIGGERS.ADMIN_UPDATED,
       )
-      setAdminAccounts(getManagedAdmins(result.data))
-      setEditAdminModal(null)
+      setClearLegacyMessage({
+        type: 'success',
+        text: `Cleared ${result.clearedCount} legacy admin record(s).`,
+      })
     } else {
-      setEditAdminModal((prev) => ({ ...prev, error: result.error }))
-    }
-  }
-
-  const handleDeleteAdmin = async () => {
-    if (!deleteAdminTarget) return
-
-    const result = deleteAdminAccount(deleteAdminTarget.id, user, data)
-    if (result.success) {
-      await logAndSave(
-        result.data,
-        makeLog({
-          actionType: ACTION_TYPES.ADMIN_DELETED,
-          targetType: 'admin',
-          targetName: deleteAdminTarget.username,
-          details: `Owner ${user?.username} deleted admin account ${deleteAdminTarget.username}`,
-          beforeState: { admin: snapshotAdmin(deleteAdminTarget) },
-          afterState: {},
-          canUndo: true,
-        }),
-        SNAPSHOT_TRIGGERS.ADMIN_DELETED,
-      )
-      setAdminAccounts(getManagedAdmins(result.data))
-      setDeleteAdminTarget(null)
+      setClearLegacyMessage({ type: 'error', text: result.error })
     }
   }
 
@@ -829,17 +789,31 @@ export default function AdminDashboard() {
                 </p>
               )}
             </div>
-            {!isReadOnlyView && (
-              <button
-                type="button"
-                className="btn-settings"
-                onClick={openSettings}
-                title="Tierlist settings"
-                aria-label="Tierlist settings"
-              >
-                <Settings size={18} />
-              </button>
-            )}
+            <div className="dashboard-header__actions">
+              {isOwner && !isOverallView && (
+                <button
+                  type="button"
+                  className="btn-delete-tierlist"
+                  onClick={handleDeleteTierlist}
+                  title="Delete tierlist"
+                  aria-label="Delete tierlist"
+                >
+                  <Trash2 size={18} />
+                  Delete Tierlist
+                </button>
+              )}
+              {!isReadOnlyView && (
+                <button
+                  type="button"
+                  className="btn-settings"
+                  onClick={openSettings}
+                  title="Tierlist settings"
+                  aria-label="Tierlist settings"
+                >
+                  <Settings size={18} />
+                </button>
+              )}
+            </div>
           </div>
         </header>
 
@@ -1030,105 +1004,43 @@ export default function AdminDashboard() {
                     <UserPlus size={20} />
                     Admin Accounts
                   </h2>
-                  <p className="dashboard-card__hint">
-                    Owner only — create and manage admin logins stored in Firestore.
-                  </p>
                 </div>
                 <span className="owner-only-badge">Owner only</span>
               </div>
 
-              <form className="dashboard-create-form admin-accounts-create" onSubmit={handleCreateAdmin}>
-                <h3 className="admin-accounts-subtitle">Create Admin</h3>
-                {createMessage.text && (
-                  <div
-                    className={`dashboard-message dashboard-message--${createMessage.type}`}
-                    role="alert"
-                  >
-                    {createMessage.text}
-                  </div>
-                )}
+              <div className="dashboard-message dashboard-message--info admin-auth-notice" role="status">
+                Admin accounts are now managed in Firebase Authentication.
+              </div>
 
-                <div className="dashboard-create-form__fields">
-                  <div className="dashboard-create-form__field">
-                    <label htmlFor="new-admin-user">Username</label>
-                    <input
-                      id="new-admin-user"
-                      type="text"
-                      placeholder="New admin username"
-                      value={newUsername}
-                      onChange={(e) => setNewUsername(e.target.value)}
-                    />
-                  </div>
-                  <div className="dashboard-create-form__field">
-                    <label htmlFor="new-admin-pass">Password</label>
-                    <input
-                      id="new-admin-pass"
-                      type="password"
-                      placeholder="New admin password"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                    />
-                  </div>
-                  <button type="submit" className="dashboard-create-form__submit">
-                    Create Admin
+              <div className="admin-auth-instructions">
+                <p>To add an admin, create a Firebase Auth user with email:</p>
+                <p>
+                  <code>username{AUTH_EMAIL_DOMAIN}</code>
+                </p>
+                <p className="admin-auth-instructions__example">
+                  Example: Username Light = <code>light{AUTH_EMAIL_DOMAIN}</code>
+                </p>
+              </div>
+
+              {hasLegacyAdmins && (
+                <div className="admin-clear-legacy">
+                  {clearLegacyMessage.text && (
+                    <div
+                      className={`dashboard-message dashboard-message--${clearLegacyMessage.type}`}
+                      role="alert"
+                    >
+                      {clearLegacyMessage.text}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="modal-btn modal-btn--ghost admin-clear-legacy__btn"
+                    onClick={handleClearOldAdmins}
+                  >
+                    Clear Old Local Admin List
                   </button>
                 </div>
-              </form>
-
-              <div className="admin-accounts-list">
-                <h3 className="admin-accounts-subtitle">Admin account list</h3>
-                {adminAccounts.length === 0 ? (
-                  <p className="admin-accounts-empty">No admin accounts created yet.</p>
-                ) : (
-                  <div className="admin-accounts-table-wrap">
-                    <table className="admin-accounts-table">
-                      <thead>
-                        <tr>
-                          <th>Username</th>
-                          <th>Role</th>
-                          <th>Created At</th>
-                          <th>Created By</th>
-                          <th>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {adminAccounts.map((admin) => (
-                          <tr key={admin.id}>
-                            <td className="admin-accounts-table__user">{admin.username}</td>
-                            <td>
-                              <span className="dashboard-nav__role dashboard-nav__role--admin">
-                                {admin.role}
-                              </span>
-                            </td>
-                            <td>{formatLogTime(admin.createdAt)}</td>
-                            <td>{admin.createdBy}</td>
-                            <td>
-                              <div className="admin-accounts-actions">
-                                <button
-                                  type="button"
-                                  className="action-btn"
-                                  title="Edit admin"
-                                  onClick={() => openEditAdmin(admin)}
-                                >
-                                  <Pencil size={14} />
-                                </button>
-                                <button
-                                  type="button"
-                                  className="action-btn action-btn--danger"
-                                  title="Delete admin"
-                                  onClick={() => setDeleteAdminTarget(admin)}
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
+              )}
             </section>
           )}
         </div>
@@ -1428,7 +1340,6 @@ export default function AdminDashboard() {
           canUndoActions={canManageAdmins}
           onClose={() => setShowLogs(false)}
           saveAppData={saveAppData}
-          onAdminsChange={() => setAdminAccounts(getManagedAdmins(data))}
           onActiveTierlistChange={(removedTierlistId, newData) => {
             if (activeId === removedTierlistId) {
               setActiveId(newData.tierlists[0]?.id ?? 'overall')
@@ -1437,109 +1348,6 @@ export default function AdminDashboard() {
         />
       )}
 
-      {!isGuest && editAdminModal && (
-        <div className="modal-overlay" onClick={() => setEditAdminModal(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-            <div className="modal__header">
-              <h3>Edit Admin Account</h3>
-              <button
-                type="button"
-                className="modal__close"
-                onClick={() => setEditAdminModal(null)}
-                aria-label="Close"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <form onSubmit={handleSaveEditAdmin}>
-              {editAdminModal.error && (
-                <div className="dashboard-message dashboard-message--error" role="alert">
-                  {editAdminModal.error}
-                </div>
-              )}
-              <div className="modal__field">
-                <label htmlFor="edit-admin-user">Username</label>
-                <input
-                  id="edit-admin-user"
-                  type="text"
-                  value={editAdminModal.username}
-                  onChange={(e) =>
-                    setEditAdminModal((prev) => ({
-                      ...prev,
-                      username: e.target.value,
-                      error: '',
-                    }))
-                  }
-                  autoFocus
-                />
-              </div>
-              <div className="modal__field">
-                <label htmlFor="edit-admin-pass">Password</label>
-                <input
-                  id="edit-admin-pass"
-                  type="password"
-                  value={editAdminModal.password}
-                  onChange={(e) =>
-                    setEditAdminModal((prev) => ({
-                      ...prev,
-                      password: e.target.value,
-                      error: '',
-                    }))
-                  }
-                />
-              </div>
-              <div className="modal__actions">
-                <button
-                  type="button"
-                  className="modal-btn modal-btn--ghost"
-                  onClick={() => setEditAdminModal(null)}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="modal-btn modal-btn--primary">
-                  Save
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {!isGuest && deleteAdminTarget && (
-        <div className="modal-overlay" onClick={() => setDeleteAdminTarget(null)}>
-          <div className="modal modal--sm" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-            <div className="modal__header">
-              <h3>Delete Admin Account</h3>
-              <button
-                type="button"
-                className="modal__close"
-                onClick={() => setDeleteAdminTarget(null)}
-                aria-label="Close"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <p className="modal__text">
-              Are you sure you want to delete this admin account?
-            </p>
-            <p className="modal__text">
-              <strong>{deleteAdminTarget.username}</strong> will no longer be able to log in.
-            </p>
-            <div className="modal__actions">
-              <button
-                type="button"
-                className="modal-btn modal-btn--ghost"
-                onClick={() => setDeleteAdminTarget(null)}
-              >
-                Cancel
-              </button>
-              <button type="button" className="modal-btn modal-btn--danger" onClick={handleDeleteAdmin}>
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

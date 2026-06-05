@@ -276,6 +276,35 @@
   gap: 1rem;
 }
 
+.dashboard-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.btn-delete-tierlist {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.75rem;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.25);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.btn-delete-tierlist:hover {
+  color: #fff;
+  background: rgba(153, 27, 27, 0.45);
+  border-color: rgba(248, 113, 113, 0.55);
+}
+
 .btn-settings {
   flex-shrink: 0;
   display: flex;
@@ -1129,6 +1158,58 @@
   color: #bbf7d0;
   background: rgba(22, 101, 52, 0.35);
   border: 1px solid rgba(74, 222, 128, 0.35);
+}
+
+.dashboard-message--info {
+  color: #bfdbfe;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(96, 165, 250, 0.35);
+}
+
+.admin-auth-notice {
+  margin-bottom: 1rem;
+}
+
+.admin-auth-instructions {
+  margin: 0 0 1.25rem;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: rgba(221, 214, 254, 0.9);
+}
+
+.admin-auth-instructions p {
+  margin: 0 0 0.5rem;
+}
+
+.admin-auth-instructions code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.88em;
+  color: #c4b5fd;
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+}
+
+.admin-auth-instructions__example {
+  color: rgba(196, 181, 253, 0.75);
+}
+
+.admin-clear-legacy {
+  margin-top: 0.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(139, 92, 246, 0.18);
+}
+
+.admin-clear-legacy__btn {
+  margin-top: 0.75rem;
+}
+
+.admin-legacy-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgba(196, 181, 253, 0.75);
 }
 
 .dashboard-message--error {
