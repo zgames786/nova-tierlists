@@ -1,8 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { useAuth } from './AuthContext'
 import { prepareAppData } from '../utils/appData'
-import { loadAppData, saveAppData as saveAppDataToFirestore, subscribeAppData } from '../utils/appDataFirestore'
+import {
+  appendSuggestionToFirestore,
+  loadAppData,
+  saveAppData as saveAppDataToFirestore,
+  subscribeAppData,
+} from '../utils/appDataFirestore'
 import { isGuest } from '../utils/adminAuth'
+import { createSnapshot } from '../utils/snapshotsFirestore'
 
 const AppDataContext = createContext(null)
 
@@ -33,8 +39,9 @@ export function AppDataProvider({ children }) {
   }, [])
 
   const saveAppData = useCallback(
-    async (newData) => {
+    async (newData, options = {}) => {
       const prepared = prepareAppData(newData)
+      const { snapshotTrigger, snapshotLabel, skipSnapshot = false } = options
 
       if (isGuest(user)) {
         setData(prepared)
@@ -44,6 +51,14 @@ export function AppDataProvider({ children }) {
       setSaving(true)
       setError(null)
       try {
+        if (!skipSnapshot && snapshotTrigger && data) {
+          await createSnapshot(data, {
+            createdBy: user?.username ?? 'unknown',
+            trigger: snapshotTrigger,
+            label: snapshotLabel ?? snapshotTrigger,
+          })
+        }
+
         const saved = await saveAppDataToFirestore(prepared)
         setData(saved)
         return saved
@@ -56,7 +71,27 @@ export function AppDataProvider({ children }) {
         setSaving(false)
       }
     },
-    [user],
+    [user, data],
+  )
+
+  const submitSuggestion = useCallback(
+    async (suggestion, logEntry = null) => {
+      setSaving(true)
+      setError(null)
+      try {
+        const saved = await appendSuggestionToFirestore(suggestion, logEntry)
+        setData(saved)
+        return saved
+      } catch (submitError) {
+        const message =
+          submitError?.message ?? 'Failed to submit suggestion to Firestore.'
+        setError(message)
+        throw submitError
+      } finally {
+        setSaving(false)
+      }
+    },
+    [],
   )
 
   const refreshAppData = useCallback(async () => {
@@ -81,10 +116,11 @@ export function AppDataProvider({ children }) {
       error,
       saving,
       saveAppData,
+      submitSuggestion,
       refreshAppData,
       setData,
     }),
-    [data, loading, error, saving, saveAppData, refreshAppData],
+    [data, loading, error, saving, saveAppData, submitSuggestion, refreshAppData],
   )
 
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>

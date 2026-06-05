@@ -86,8 +86,10 @@ function validatePlayerUndo(log, data) {
 
   if (
     log.actionType === ACTION_TYPES.PLAYER_EDITED ||
+    log.actionType === ACTION_TYPES.TIERLIST_PLAYER_RANK_UPDATED ||
     log.actionType === ACTION_TYPES.PLAYER_MOVED_UP ||
-    log.actionType === ACTION_TYPES.PLAYER_MOVED_DOWN
+    log.actionType === ACTION_TYPES.PLAYER_MOVED_DOWN ||
+    log.actionType === ACTION_TYPES.TIERLIST_PLAYER_MOVED
   ) {
     if (!playerId || !tierlist.players.some((player) => player.id === playerId)) {
       return { valid: false, error: 'Cannot undo because this player no longer exists.' }
@@ -194,6 +196,8 @@ export function validateUndo(log, data) {
     case ACTION_TYPES.PLAYER_DELETED:
     case ACTION_TYPES.PLAYER_MOVED_UP:
     case ACTION_TYPES.PLAYER_MOVED_DOWN:
+    case ACTION_TYPES.TIERLIST_PLAYER_RANK_UPDATED:
+    case ACTION_TYPES.TIERLIST_PLAYER_MOVED:
       return validatePlayerUndo(log, data)
     case ACTION_TYPES.TIERLIST_CREATED:
     case ACTION_TYPES.TIERLIST_RENAMED:
@@ -233,7 +237,8 @@ function undoPlayerAction(data, log) {
       players.splice(index, 0, restored)
       return replaceTierlistPlayers(data, tierlistId, players)
     }
-    case ACTION_TYPES.PLAYER_EDITED: {
+    case ACTION_TYPES.PLAYER_EDITED:
+    case ACTION_TYPES.TIERLIST_PLAYER_RANK_UPDATED: {
       const beforePlayer = log.beforeState.player
       const tierlist = findTierlist(data, tierlistId)
       return replaceTierlistPlayers(
@@ -246,6 +251,7 @@ function undoPlayerAction(data, log) {
     }
     case ACTION_TYPES.PLAYER_MOVED_UP:
     case ACTION_TYPES.PLAYER_MOVED_DOWN:
+    case ACTION_TYPES.TIERLIST_PLAYER_MOVED:
       return replaceTierlistPlayers(data, tierlistId, log.beforeState.players)
     default:
       return data
@@ -345,6 +351,8 @@ export function applyUndo(data, log, user) {
       ACTION_TYPES.PLAYER_DELETED,
       ACTION_TYPES.PLAYER_MOVED_UP,
       ACTION_TYPES.PLAYER_MOVED_DOWN,
+      ACTION_TYPES.TIERLIST_PLAYER_RANK_UPDATED,
+      ACTION_TYPES.TIERLIST_PLAYER_MOVED,
     ].includes(log.actionType)
   ) {
     nextData = undoPlayerAction(data, log)

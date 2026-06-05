@@ -1,9 +1,12 @@
 import { getEffectiveTier, resolvePlayerDisplay } from './tierlistHelpers'
+import { getActiveSmpPlayers } from './playerSync'
+import { getDisplayRank } from './rankingDisplay'
 
-export const DATA_VERSION = 4
+export const DATA_VERSION = 5
 export const OVERALL_ID = 'overall'
+export const DEFAULT_TIER = 'Unranked'
 
-export const TIERS = ['S+', 'S', 'A', 'B', 'C', 'D', 'F']
+export const TIERS = ['S+', 'S', 'A', 'B', 'C', 'D', 'F', 'Unranked']
 
 export const DEFAULT_POINT_SYSTEM = {
   'S+': 50,
@@ -13,6 +16,7 @@ export const DEFAULT_POINT_SYSTEM = {
   C: 5,
   D: 2,
   F: 1,
+  Unranked: 0,
 }
 
 export const DEFAULT_TIER_POINTS = DEFAULT_POINT_SYSTEM
@@ -25,8 +29,8 @@ export const TIER_COLORS = {
   C: '#fbbf24',
   D: '#fb923c',
   F: '#f87171',
+  Unranked: '#94a3b8',
 }
-
 
 export function getAutoTierForPosition(position) {
   if (position === 1) return 'S+'
@@ -98,19 +102,22 @@ function normalizePlayer(player, position, tierlist) {
   const pointSystem = getPointSystem(tierlist)
 
   if (player.tierMode === 'manual') {
-    const manualTier = player.manualTier ?? player.tier ?? 'F'
+    const manualTier = player.manualTier ?? player.tier ?? DEFAULT_TIER
     return {
       id: player.id,
+      smpPlayerId: player.smpPlayerId ?? null,
       name: player.name,
       tierMode: 'manual',
       autoTier,
       manualTier,
-      points: player.points != null ? Number(player.points) : pointSystem[manualTier] ?? 0,
+      points:
+        player.points != null ? Number(player.points) : pointSystem[manualTier] ?? 0,
     }
   }
 
   return {
     id: player.id,
+    smpPlayerId: player.smpPlayerId ?? null,
     name: player.name,
     tierMode: 'auto',
     autoTier,
@@ -148,7 +155,7 @@ export function applyAutoAssignment(tierlist) {
     const autoTier = getAutoTierForPosition(position)
 
     if (player.tierMode === 'manual') {
-      const manualTier = player.manualTier ?? 'F'
+      const manualTier = player.manualTier ?? DEFAULT_TIER
       return {
         ...player,
         autoTier,
@@ -171,7 +178,7 @@ export function applyAutoAssignment(tierlist) {
   return { ...tierlist, players }
 }
 
-/** Sum player points from all non-Overall tierlists; sort and assign position tiers. */
+/** Sum player points from all non-Overall tierlists; include all SMP players. */
 export function calculateOverall(data) {
   const overallIndex = data.tierlists.findIndex((t) => t.id === OVERALL_ID)
   if (overallIndex === -1) {
@@ -180,32 +187,48 @@ export function calculateOverall(data) {
 
   const overallTemplate = data.tierlists[overallIndex]
   const sourceTierlists = data.tierlists.filter((t) => !isOverallTierlist(t))
+  const smpPlayers = getActiveSmpPlayers(data)
 
-  const totals = new Map()
+  const totals = new Map(
+    smpPlayers.map((player) => [
+      player.id,
+      { name: player.name, smpPlayerId: player.id, points: 0 },
+    ]),
+  )
 
   for (const tierlist of sourceTierlists) {
     for (const player of tierlist.players) {
-      const name = player.name.trim()
-      if (!name) continue
+      const smpId = player.smpPlayerId ?? player.id
+      if (!totals.has(smpId)) continue
       const display = resolvePlayerDisplay(player, tierlist)
-      totals.set(name, (totals.get(name) ?? 0) + Number(display.points ?? 0))
+      totals.get(smpId).points += Number(display.points ?? 0)
     }
   }
 
-  const sorted = [...totals.entries()].sort((a, b) => b[1] - a[1])
+  const sorted = smpPlayers
+    .map((smp, order) => {
+      const entry = totals.get(smp.id)
+      return entry ? { ...entry, order } : null
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (b.points !== a.points) return b.points - a.points
+      return a.order - b.order
+    })
 
-  const players = sorted.map(([name, totalPoints], index) => {
-    const position = index + 1
-    const autoTier = getAutoTierForPosition(position)
-    const stableId = `overall-${slugify(name) || 'player'}`
+  const players = sorted.map((entry, index) => {
+    const rank = getDisplayRank(sorted, index, (row) => row.points)
+    const autoTier = getAutoTierForPosition(rank)
+    const stableId = `overall-${slugify(entry.name) || entry.smpPlayerId}`
 
     return {
       id: stableId,
-      name,
+      smpPlayerId: entry.smpPlayerId,
+      name: entry.name,
       tierMode: 'auto',
       autoTier,
       manualTier: null,
-      points: totalPoints,
+      points: entry.points,
     }
   })
 
@@ -236,7 +259,7 @@ export function migrateTierlistFromRaw(tierlist) {
     name: tierlist.name,
     isDefault: isOverall ? true : Boolean(tierlist.isDefault),
     isCalculated: isOverall ? true : Boolean(tierlist.isCalculated),
-    autoTierAssignment: tierlist.autoTierAssignment !== false,
+    autoTierAssignment: isOverall ? true : tierlist.autoTierAssignment === true,
     pointSystem,
     icon: tierlist.icon ?? null,
     color: tierlist.color ?? null,
@@ -256,10 +279,10 @@ export function migrateTierlistFromRaw(tierlist) {
     return normalizePlayer(
       {
         id: p.id,
+        smpPlayerId: p.smpPlayerId,
         name: p.name,
-        tierMode: 'auto',
-        autoTier: p.tier ?? 'F',
-        manualTier: null,
+        tierMode: 'manual',
+        manualTier: p.tier ?? p.manualTier ?? DEFAULT_TIER,
         points: p.points,
       },
       i + 1,
@@ -290,11 +313,15 @@ function persist(data) {
     version: DATA_VERSION,
     settings: data.settings ?? {},
     logs: Array.isArray(data.logs) ? data.logs : [],
+    smpPlayers: data.smpPlayers ?? [],
+    suggestions: data.suggestions ?? [],
     tierlists: data.tierlists ?? [],
   })
   return {
     ...calculated,
     admins: data.admins ?? [],
+    smpPlayers: data.smpPlayers ?? [],
+    suggestions: data.suggestions ?? [],
   }
 }
 
@@ -320,7 +347,7 @@ export function createTierlist(data, name) {
     name: trimmed,
     isDefault: false,
     isCalculated: false,
-    autoTierAssignment: true,
+    autoTierAssignment: false,
     pointSystem: { ...DEFAULT_POINT_SYSTEM },
     icon: null,
     color: null,
@@ -387,6 +414,10 @@ export function updatePointSystem(data, tierlistId, pointSystem) {
     pointSystem: merged,
     players: tierlist.players.map((p) => {
       if (p.tierMode === 'manual') {
+        const tier = getEffectiveTier(p)
+        if (p.points == null || p.points === getPointsForTier(tierlist, tier)) {
+          return { ...p, points: merged[tier] ?? p.points }
+        }
         return p
       }
       const tier = getEffectiveTier(p)
@@ -399,55 +430,9 @@ export function updatePointSystem(data, tierlistId, pointSystem) {
   return { success: true, data: next }
 }
 
-export function addPlayer(data, tierlistId, payload) {
+export function updateTierlistPlayerRank(data, tierlistId, playerId, payload) {
   const blocked = rejectOverallMutation(tierlistId)
   if (blocked) return blocked
-
-  const trimmed = payload.name?.trim()
-  if (!trimmed) {
-    return { success: false, error: 'Player name is required.' }
-  }
-
-  const tierlist = data.tierlists.find((t) => t.id === tierlistId)
-  if (!tierlist) {
-    return { success: false, error: 'Tierlist not found.' }
-  }
-
-  const position = tierlist.players.length + 1
-  const selectedTier = payload.manualTier ?? 'F'
-  const tierMode =
-    payload.tierMode ??
-    (tierlist.autoTierAssignment && !payload.manualTier ? 'auto' : 'manual')
-
-  const player = {
-    id: uniqueId('player'),
-    name: trimmed,
-    tierMode: tierMode === 'auto' ? 'auto' : 'manual',
-    autoTier: getAutoTierForPosition(position),
-    manualTier: tierMode === 'manual' ? selectedTier : null,
-    points:
-      payload.points != null && payload.points !== ''
-        ? Number(payload.points)
-        : getPointsForTier(
-            tierlist,
-            tierMode === 'manual' ? selectedTier : getAutoTierForPosition(position),
-          ),
-  }
-
-  let updated = { ...tierlist, players: [...tierlist.players, player] }
-  updated = finalizeTierlist(updated)
-  const next = persist(mapTierlist(data, tierlistId, () => updated))
-  return { success: true, data: next, player }
-}
-
-export function updatePlayer(data, tierlistId, playerId, payload) {
-  const blocked = rejectOverallMutation(tierlistId)
-  if (blocked) return blocked
-
-  const trimmed = payload.name?.trim()
-  if (!trimmed) {
-    return { success: false, error: 'Player name is required.' }
-  }
 
   const tierlist = data.tierlists.find((t) => t.id === tierlistId)
   if (!tierlist) {
@@ -461,8 +446,8 @@ export function updatePlayer(data, tierlistId, playerId, payload) {
 
   const position = index + 1
   const autoTier = getAutoTierForPosition(position)
-  const tierMode = tierlist.autoTierAssignment ? payload.tierMode ?? 'auto' : 'manual'
-  const manualTier = tierMode === 'manual' ? payload.manualTier ?? 'F' : null
+  const tierMode = tierlist.autoTierAssignment ? payload.tierMode ?? 'manual' : 'manual'
+  const manualTier = tierMode === 'manual' ? payload.manualTier ?? DEFAULT_TIER : null
   const points =
     payload.points != null && payload.points !== ''
       ? Number(payload.points)
@@ -472,7 +457,6 @@ export function updatePlayer(data, tierlistId, playerId, payload) {
 
   const updatedPlayer = {
     ...tierlist.players[index],
-    name: trimmed,
     tierMode,
     autoTier,
     manualTier,
@@ -485,27 +469,7 @@ export function updatePlayer(data, tierlistId, playerId, payload) {
   }
   updated = finalizeTierlist(updated)
   const next = persist(mapTierlist(data, tierlistId, () => updated))
-  return { success: true, data: next }
-}
-
-export function deletePlayer(data, tierlistId, playerId) {
-  const blocked = rejectOverallMutation(tierlistId)
-  if (blocked) return blocked
-
-  const tierlist = data.tierlists.find((t) => t.id === tierlistId)
-  if (!tierlist) {
-    return { success: false, error: 'Tierlist not found.' }
-  }
-
-  const removed = tierlist.players.find((p) => p.id === playerId)
-
-  let updated = {
-    ...tierlist,
-    players: tierlist.players.filter((p) => p.id !== playerId),
-  }
-  updated = finalizeTierlist(updated)
-  const next = persist(mapTierlist(data, tierlistId, () => updated))
-  return { success: true, data: next, removed }
+  return { success: true, data: next, player: updatedPlayer }
 }
 
 export function movePlayer(data, tierlistId, playerId, direction) {

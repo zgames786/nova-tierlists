@@ -1,7 +1,8 @@
 import { getManagedAdmins } from './adminStorage'
 import { prepareAppData } from './appData'
 import { resolvePlayerDisplay } from './tierlistHelpers'
-import { DATA_VERSION, getPointSystem } from './tierlistsStorage'
+import { buildRankedPlayerRows } from './rankingDisplay'
+import { DATA_VERSION, getPointSystem, isOverallTierlist } from './tierlistsStorage'
 
 export const BACKUP_FILENAME = 'novasmp-tierlists-backup.json'
 export const PUBLIC_RANKINGS_FILENAME = 'novasmp-public-rankings.json'
@@ -11,6 +12,8 @@ export function buildBackupPayload(data, session = null) {
     version: DATA_VERSION,
     exportedAt: new Date().toISOString(),
     tierlists: data.tierlists ?? [],
+    smpPlayers: data.smpPlayers ?? [],
+    suggestions: data.suggestions ?? [],
     admins: getManagedAdmins(data),
     logs: data.logs ?? [],
     settings: data.settings ?? {},
@@ -28,10 +31,14 @@ export function buildPublicRankingsPayload(data) {
       name: tierlist.name,
       isCalculated: Boolean(tierlist.isCalculated),
       pointSystem: getPointSystem(tierlist),
-      players: (tierlist.players ?? []).map((player, index) => {
+      players: buildRankedPlayerRows(
+        tierlist.players ?? [],
+        (player) => resolvePlayerDisplay(player, tierlist).points,
+        { competition: isOverallTierlist(tierlist) },
+      ).map(({ player, displayRank }) => {
         const display = resolvePlayerDisplay(player, tierlist)
         return {
-          rank: index + 1,
+          rank: displayRank,
           name: player.name,
           tier: display.tier,
           points: display.points,
@@ -99,6 +106,8 @@ export function buildImportedAppData(payload) {
   return prepareAppData({
     version: DATA_VERSION,
     tierlists: payload.tierlists,
+    smpPlayers: payload.smpPlayers ?? [],
+    suggestions: payload.suggestions ?? [],
     logs: payload.logs ?? [],
     settings: payload.settings ?? {},
     admins: payload.admins ?? [],

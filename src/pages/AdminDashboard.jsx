@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Camera,
   ChevronDown,
   ChevronUp,
   Download,
@@ -16,6 +17,9 @@ import {
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import AdminLogsModal from '../components/AdminLogsModal'
+import SnapshotsModal from '../components/SnapshotsModal'
+import SmpPlayerListSection from '../components/SmpPlayerListSection'
+import SuggestionsSection from '../components/SuggestionsSection'
 import { useAppData } from '../context/AppDataContext'
 import { useAuth } from '../context/AuthContext'
 import {
@@ -24,7 +28,7 @@ import {
   updateAdminAccount,
 } from '../utils/adminAuth'
 import { getManagedAdmins } from '../utils/adminStorage'
-import { ACTION_TYPES, appendLog, createLogEntry, formatLogTime } from '../utils/activityLog'
+import { ACTION_TYPES, appendLog, createLogEntry, formatLogTime, SNAPSHOT_TRIGGERS } from '../utils/activityLog'
 import {
   BACKUP_FILENAME,
   buildBackupPayload,
@@ -43,12 +47,13 @@ import {
   snapshotPointSystem,
   snapshotTierlistForCreate,
 } from '../utils/logSnapshots'
+import { buildRankedPlayerRows } from '../utils/rankingDisplay'
+import { restoreSnapshot } from '../utils/snapshotsFirestore'
 import {
   TIERS,
   TIER_COLORS,
-  addPlayer,
+  DEFAULT_TIER,
   createTierlist,
-  deletePlayer,
   getAutoTierForPosition,
   getAutoTierRangesLabel,
   getDefaultPoints,
@@ -57,7 +62,7 @@ import {
   isOverallTierlist,
   movePlayer,
   resolvePlayerDisplay,
-  updatePlayer,
+  updateTierlistPlayerRank,
   updatePointSystem,
   updateTierlistSettings,
 } from '../utils/tierlistsStorage'
@@ -65,8 +70,8 @@ import './AdminDashboard.css'
 
 export default function AdminDashboard() {
   const navigate = useNavigate()
-  const { user, logout, isGuest, canManageAdmins } = useAuth()
-  const { data, saveAppData, saving, error: dataError } = useAppData()
+  const { user, logout, isGuest, canManageAdmins, isOwner } = useAuth()
+  const { data, saveAppData, submitSuggestion, saving, error: dataError } = useAppData()
   const importInputRef = useRef(null)
 
   const [activeId, setActiveId] = useState('overall')
@@ -90,8 +95,8 @@ export default function AdminDashboard() {
   const [tierSettingsModal, setTierSettingsModal] = useState(null)
 
   const [playerModal, setPlayerModal] = useState(null)
-  const [deleteTarget, setDeleteTarget] = useState(null)
   const [showLogs, setShowLogs] = useState(false)
+  const [showSnapshots, setShowSnapshots] = useState(false)
   const [importError, setImportError] = useState('')
 
   const [newUsername, setNewUsername] = useState('')
@@ -107,11 +112,21 @@ export default function AdminDashboard() {
     }
   }, [canManageAdmins, data])
 
+  const activeTierlist = data?.tierlists?.find((t) => t.id === activeId) ?? data?.tierlists?.[0]
+  const isOverallViewEarly = activeTierlist ? isOverallTierlist(activeTierlist) : false
+  const rankedPlayerRows = useMemo(() => {
+    if (!activeTierlist?.players?.length) return []
+    return buildRankedPlayerRows(
+      activeTierlist.players,
+      (player) => resolvePlayerDisplay(player, activeTierlist).points,
+      { competition: isOverallViewEarly },
+    )
+  }, [activeTierlist, isOverallViewEarly])
+
   if (!data) {
     return null
   }
 
-  const activeTierlist = data.tierlists.find((t) => t.id === activeId) ?? data.tierlists[0]
   const activePointSystem = activeTierlist ? getPointSystem(activeTierlist) : {}
   const isOverallView = activeTierlist ? isOverallTierlist(activeTierlist) : false
   const isReadOnlyView = isGuest || isOverallView
@@ -137,9 +152,9 @@ export default function AdminDashboard() {
       canUndo,
     })
 
-  const logAndSave = async (newData, entry) => {
+  const logAndSave = async (newData, entry, snapshotTrigger) => {
     const withLog = entry ? appendLog(newData, entry) : newData
-    return saveAppData(withLog)
+    return saveAppData(withLog, snapshotTrigger ? { snapshotTrigger } : {})
   }
 
   const handleLogout = async () => {
@@ -220,6 +235,7 @@ export default function AdminDashboard() {
           targetName: file.name,
           details: 'Imported backup and replaced app data in Firestore',
         }),
+        SNAPSHOT_TRIGGERS.IMPORT_DATA,
       )
       if (saved.tierlists.some((t) => t.id === activeId)) {
         setActiveId(activeId)
@@ -254,6 +270,7 @@ export default function AdminDashboard() {
           },
           canUndo: true,
         }),
+        SNAPSHOT_TRIGGERS.TIERLIST_CREATED,
       )
       setActiveId(result.tierlist.id)
       setNewTierlistName('')
@@ -301,6 +318,7 @@ export default function AdminDashboard() {
           },
           canUndo: true,
         }),
+        SNAPSHOT_TRIGGERS.POINT_SYSTEM_UPDATED,
       )
       setTierSettingsModal(null)
     }
@@ -327,6 +345,7 @@ export default function AdminDashboard() {
             afterState: { tierlistId: activeTierlist.id, name: newName },
             canUndo: true,
           }),
+          SNAPSHOT_TRIGGERS.TIERLIST_RENAMED,
         )
       } else {
         await logAndSave(result.data)
@@ -337,26 +356,12 @@ export default function AdminDashboard() {
     }
   }
 
-  const openAddPlayer = () => {
-    const nextPos = (activeTierlist?.players.length ?? 0) + 1
-    const autoTier = getAutoTierForPosition(nextPos)
-    setPlayerModal({
-      mode: 'add',
-      name: '',
-      tierMode: 'manual',
-      manualTier: 'F',
-      points: getDefaultPoints(activeTierlist, 'F'),
-      previewAutoTier: autoTier,
-    })
-  }
-
   const openEditPlayer = (player, index) => {
     const display = resolvePlayerDisplay(player, activeTierlist)
     setPlayerModal({
-      mode: 'edit',
       playerId: player.id,
-      name: player.name,
-      tierMode: player.tierMode ?? 'auto',
+      playerName: player.name,
+      tierMode: player.tierMode ?? 'manual',
       manualTier: player.manualTier ?? display.tier,
       points: player.points,
       previewAutoTier: getAutoTierForPosition(index + 1),
@@ -367,117 +372,57 @@ export default function AdminDashboard() {
     e.preventDefault()
     if (!playerModal || !activeTierlist) return
 
-    const payload =
-      playerModal.mode === 'add'
-        ? {
-            name: playerModal.name,
-            tierMode: 'manual',
-            manualTier: playerModal.manualTier,
-            points: playerModal.points,
-          }
-        : {
-            name: playerModal.name,
-            tierMode: playerModal.tierMode,
-            manualTier: playerModal.manualTier,
-            points: playerModal.points,
-          }
+    const payload = {
+      tierMode: playerModal.tierMode,
+      manualTier: playerModal.manualTier,
+      points: playerModal.points,
+    }
 
-    const result =
-      playerModal.mode === 'add'
-        ? addPlayer(data, activeTierlist.id, payload)
-        : updatePlayer(data, activeTierlist.id, playerModal.playerId, payload)
+    const result = updateTierlistPlayerRank(
+      data,
+      activeTierlist.id,
+      playerModal.playerId,
+      payload,
+    )
 
     if (result.success) {
-      const tier = getEffectiveTier(
-        playerModal.mode === 'add'
-          ? { tierMode: 'manual', manualTier: playerModal.manualTier }
-          : {
-              tierMode: playerModal.tierMode,
-              manualTier: playerModal.manualTier,
-              autoTier: playerModal.previewAutoTier,
-            },
-      )
+      const tier = getEffectiveTier({
+        tierMode: playerModal.tierMode,
+        manualTier: playerModal.manualTier,
+        autoTier: playerModal.previewAutoTier,
+      })
       const points = Number(playerModal.points)
-      const playerName = playerModal.name.trim()
-      const isAdd = playerModal.mode === 'add'
+      const playerName = playerModal.playerName
       const updatedTierlist = result.data.tierlists.find(
         (tierlist) => tierlist.id === activeTierlist.id,
       )
+      const beforePlayer = activeTierlist.players.find(
+        (player) => player.id === playerModal.playerId,
+      )
+      const afterPlayer = updatedTierlist.players.find(
+        (player) => player.id === playerModal.playerId,
+      )
 
-      if (isAdd) {
-        const addedPlayer = updatedTierlist.players.find(
-          (player) => player.id === result.player?.id,
-        )
-        await logAndSave(
-          result.data,
-          makeLog({
-            actionType: ACTION_TYPES.PLAYER_ADDED,
-            targetType: 'player',
-            targetName: playerName,
-            details: `Added ${playerName} to ${activeTierlist.name} with tier ${tier} and ${points} points`,
-            beforeState: { tierlistId: activeTierlist.id },
-            afterState: {
-              tierlistId: activeTierlist.id,
-              player: snapshotPlayer(addedPlayer),
-            },
-            canUndo: true,
-          }),
-        )
-      } else {
-        const beforePlayer = activeTierlist.players.find(
-          (player) => player.id === playerModal.playerId,
-        )
-        const afterPlayer = updatedTierlist.players.find(
-          (player) => player.id === playerModal.playerId,
-        )
-        await logAndSave(
-          result.data,
-          makeLog({
-            actionType: ACTION_TYPES.PLAYER_EDITED,
-            targetType: 'player',
-            targetName: playerName,
-            details: `Edited ${playerName} on ${activeTierlist.name} (tier ${tier}, ${points} points)`,
-            beforeState: {
-              tierlistId: activeTierlist.id,
-              player: snapshotPlayer(beforePlayer),
-            },
-            afterState: {
-              tierlistId: activeTierlist.id,
-              player: snapshotPlayer(afterPlayer),
-            },
-            canUndo: true,
-          }),
-        )
-      }
-      setPlayerModal(null)
-    }
-  }
-
-  const handleDeletePlayer = async () => {
-    if (!deleteTarget || !activeTierlist) return
-    const playerIndex = activeTierlist.players.findIndex(
-      (player) => player.id === deleteTarget.id,
-    )
-    const result = deletePlayer(data, activeTierlist.id, deleteTarget.id)
-    if (result.success) {
       await logAndSave(
         result.data,
         makeLog({
-          actionType: ACTION_TYPES.PLAYER_DELETED,
+          actionType: ACTION_TYPES.TIERLIST_PLAYER_RANK_UPDATED,
           targetType: 'player',
-          targetName: deleteTarget.name,
-          details: `Removed ${deleteTarget.name} from ${activeTierlist.name}`,
+          targetName: playerName,
+          details: `Updated ${playerName} on ${activeTierlist.name} (tier ${tier}, ${points} points)`,
           beforeState: {
             tierlistId: activeTierlist.id,
-            player: snapshotPlayer(deleteTarget),
-            playerIndex,
-            players: snapshotPlayers(activeTierlist.players),
+            player: snapshotPlayer(beforePlayer),
           },
-          afterState: {},
+          afterState: {
+            tierlistId: activeTierlist.id,
+            player: snapshotPlayer(afterPlayer),
+          },
           canUndo: true,
         }),
+        SNAPSHOT_TRIGGERS.TIERLIST_RANK_CHANGED,
       )
-      setDeleteTarget(null)
+      setPlayerModal(null)
     }
   }
 
@@ -492,10 +437,7 @@ export default function AdminDashboard() {
       await logAndSave(
         result.data,
         makeLog({
-          actionType:
-            direction === 'up'
-              ? ACTION_TYPES.PLAYER_MOVED_UP
-              : ACTION_TYPES.PLAYER_MOVED_DOWN,
+          actionType: ACTION_TYPES.TIERLIST_PLAYER_MOVED,
           targetType: 'player',
           targetName: moved?.name ?? '',
           details: `Moved ${moved?.name ?? 'player'} ${direction} on ${activeTierlist.name}`,
@@ -509,6 +451,7 @@ export default function AdminDashboard() {
           },
           canUndo: true,
         }),
+        SNAPSHOT_TRIGGERS.PLAYER_MOVED,
       )
     }
   }
@@ -530,6 +473,7 @@ export default function AdminDashboard() {
           afterState: { admin: snapshotAdmin(result.admin) },
           canUndo: true,
         }),
+        SNAPSHOT_TRIGGERS.ADMIN_CREATED,
       )
       setAdminAccounts(getManagedAdmins(result.data))
       setCreateMessage({ type: 'success', text: `Admin "${trimmed}" created.` })
@@ -573,6 +517,7 @@ export default function AdminDashboard() {
           afterState: { admin: snapshotAdmin(result.admin) },
           canUndo: true,
         }),
+        SNAPSHOT_TRIGGERS.ADMIN_UPDATED,
       )
       setAdminAccounts(getManagedAdmins(result.data))
       setEditAdminModal(null)
@@ -597,6 +542,7 @@ export default function AdminDashboard() {
           afterState: {},
           canUndo: true,
         }),
+        SNAPSHOT_TRIGGERS.ADMIN_DELETED,
       )
       setAdminAccounts(getManagedAdmins(result.data))
       setDeleteAdminTarget(null)
@@ -605,7 +551,7 @@ export default function AdminDashboard() {
 
   const setPlayerTierMode = (tierMode) => {
     setPlayerModal((prev) => {
-      const manualTier = prev.manualTier ?? 'F'
+      const manualTier = prev.manualTier ?? DEFAULT_TIER
       const tier = tierMode === 'manual' ? manualTier : prev.previewAutoTier
       return {
         ...prev,
@@ -621,6 +567,102 @@ export default function AdminDashboard() {
       manualTier,
       points: getDefaultPoints(activeTierlist, manualTier),
     }))
+  }
+
+  const handleSmpSave = async (newData, entry, snapshotTrigger) => {
+    await logAndSave(newData, entry, snapshotTrigger)
+  }
+
+  const smpPlayerLogHandlers = {
+    playerCreated: (player) =>
+      makeLog({
+        actionType: ACTION_TYPES.PLAYER_CREATED,
+        targetType: 'smp_player',
+        targetName: player.name,
+        details: `Added SMP player ${player.name}`,
+        afterState: { player },
+        canUndo: true,
+      }),
+    playerUpdated: (player, previousName) =>
+      makeLog({
+        actionType: ACTION_TYPES.PLAYER_UPDATED,
+        targetType: 'smp_player',
+        targetName: player.name,
+        details: `Renamed SMP player from "${previousName}" to "${player.name}"`,
+        beforeState: { name: previousName },
+        afterState: { player },
+        canUndo: true,
+      }),
+    playerDeleted: (player) =>
+      makeLog({
+        actionType: ACTION_TYPES.PLAYER_DELETED,
+        targetType: 'smp_player',
+        targetName: player.name,
+        details: `Deleted SMP player ${player.name} from all tierlists`,
+        beforeState: { player },
+        canUndo: true,
+      }),
+  }
+
+  const suggestionLogHandlers = {
+    suggestionCreated: (suggestion) =>
+      createLogEntry({
+        adminUsername: suggestion.submittedBy,
+        adminRole: suggestion.submittedByRole,
+        actionType: ACTION_TYPES.SUGGESTION_CREATED,
+        targetType: 'suggestion',
+        targetName: suggestion.submittedBy,
+        details: `New suggestion: ${suggestion.type}`,
+        afterState: { suggestion },
+      }),
+    suggestionReviewed: (suggestion, previousStatus) =>
+      makeLog({
+        actionType: ACTION_TYPES.SUGGESTION_REVIEWED,
+        targetType: 'suggestion',
+        targetName: suggestion.submittedBy,
+        details: `Marked suggestion as reviewed (was ${previousStatus})`,
+        beforeState: { status: previousStatus },
+        afterState: { suggestion },
+      }),
+    suggestionApproved: (suggestion, previousStatus) =>
+      makeLog({
+        actionType: ACTION_TYPES.SUGGESTION_APPROVED,
+        targetType: 'suggestion',
+        targetName: suggestion.submittedBy,
+        details: `Approved suggestion (was ${previousStatus})`,
+        beforeState: { status: previousStatus },
+        afterState: { suggestion },
+      }),
+    suggestionRejected: (suggestion, previousStatus) =>
+      makeLog({
+        actionType: ACTION_TYPES.SUGGESTION_REJECTED,
+        targetType: 'suggestion',
+        targetName: suggestion.submittedBy,
+        details: `Rejected suggestion (was ${previousStatus})`,
+        beforeState: { status: previousStatus },
+        afterState: { suggestion },
+      }),
+    suggestionDeleted: (suggestion) =>
+      makeLog({
+        actionType: ACTION_TYPES.SUGGESTION_DELETED,
+        targetType: 'suggestion',
+        targetName: suggestion.submittedBy,
+        details: 'Deleted suggestion',
+        beforeState: { suggestion },
+      }),
+  }
+
+  const handleRestoreSnapshot = async (snapshot) => {
+    const restored = await restoreSnapshot(snapshot)
+    await logAndSave(
+      restored,
+      makeLog({
+        actionType: ACTION_TYPES.SNAPSHOT_RESTORED,
+        targetType: 'snapshot',
+        targetName: snapshot.label ?? snapshot.trigger,
+        details: `Restored snapshot from ${formatLogTime(snapshot.createdAt)}`,
+      }),
+    )
   }
 
   return (
@@ -675,6 +717,16 @@ export default function AdminDashboard() {
                 <ScrollText size={16} />
                 Logs
               </button>
+              {isOwner && (
+                <button
+                  type="button"
+                  className="dashboard-nav__link dashboard-nav__btn"
+                  onClick={() => setShowSnapshots(true)}
+                >
+                  <Camera size={16} />
+                  Snapshots
+                </button>
+              )}
               <button
                 type="button"
                 className="dashboard-nav__link dashboard-nav__btn"
@@ -800,10 +852,6 @@ export default function AdminDashboard() {
                   <button type="button" className="btn-tier-settings" onClick={openTierSettings}>
                     Tier Settings
                   </button>
-                  <button type="button" className="btn-add-player" onClick={openAddPlayer}>
-                    <Plus size={16} />
-                    Add Player
-                  </button>
                 </div>
               )}
             </div>
@@ -823,21 +871,24 @@ export default function AdminDashboard() {
               {activeTierlist?.players.length === 0 && (
                 <div className="rankings-empty">
                   {isGuest
-                    ? 'No players ranked on this tierlist yet.'
+                    ? 'No SMP players on this tierlist yet.'
                     : isOverallView
-                      ? 'No players yet. Add players to other tierlists to populate Overall.'
-                      : 'No players yet. Add your first player.'}
+                      ? 'No SMP players yet. Add players to the global Player List below.'
+                      : 'No SMP players yet. Add players to the global Player List below.'}
                 </div>
               )}
 
-              {activeTierlist?.players.map((player, index) => {
+              {rankedPlayerRows.map(({ player, displayRank }) => {
                 const display = resolvePlayerDisplay(player, activeTierlist)
+                const storageIndex = activeTierlist.players.findIndex(
+                  (entry) => entry.id === player.id,
+                )
                 return (
                   <div
                     key={player.id}
                     className={`rankings-row${isReadOnlyView ? ' rankings-row--overall' : ''}`}
                   >
-                    <span>{index + 1}</span>
+                    <span>{displayRank}</span>
                     <span className="rankings-player">{player.name}</span>
                     <span className="rankings-tier-cell">
                       <span
@@ -870,24 +921,16 @@ export default function AdminDashboard() {
                         <button
                           type="button"
                           className="action-btn"
-                          title="Edit"
-                          onClick={() => openEditPlayer(player, index)}
+                          title="Edit rank"
+                          onClick={() => openEditPlayer(player, storageIndex)}
                         >
                           <Pencil size={14} />
                         </button>
                         <button
                           type="button"
-                          className="action-btn action-btn--danger"
-                          title="Delete"
-                          onClick={() => setDeleteTarget(player)}
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                        <button
-                          type="button"
                           className="action-btn"
                           title="Move up"
-                          disabled={index === 0}
+                          disabled={storageIndex <= 0}
                           onClick={() => handleMove(player.id, 'up')}
                         >
                           <ChevronUp size={14} />
@@ -896,7 +939,7 @@ export default function AdminDashboard() {
                           type="button"
                           className="action-btn"
                           title="Move down"
-                          disabled={index === activeTierlist.players.length - 1}
+                          disabled={storageIndex >= activeTierlist.players.length - 1}
                           onClick={() => handleMove(player.id, 'down')}
                         >
                           <ChevronDown size={14} />
@@ -937,6 +980,47 @@ export default function AdminDashboard() {
               ))}
             </div>
           </section>
+
+          <SmpPlayerListSection
+            data={data}
+            canManage={!isGuest}
+            user={user}
+            onSave={(newData, entry) =>
+              handleSmpSave(
+                newData,
+                entry,
+                entry?.actionType === ACTION_TYPES.PLAYER_CREATED
+                  ? SNAPSHOT_TRIGGERS.PLAYER_CREATED
+                  : entry?.actionType === ACTION_TYPES.PLAYER_UPDATED
+                    ? SNAPSHOT_TRIGGERS.PLAYER_UPDATED
+                    : entry?.actionType === ACTION_TYPES.PLAYER_DELETED
+                      ? SNAPSHOT_TRIGGERS.PLAYER_DELETED
+                      : null,
+              )
+            }
+            onLog={smpPlayerLogHandlers}
+          />
+
+          <SuggestionsSection
+            data={data}
+            user={user}
+            isGuest={isGuest}
+            canManageSuggestions={!isGuest}
+            tierlists={data.tierlists}
+            smpPlayers={(data.smpPlayers ?? []).filter((p) => p.status === 'active')}
+            onSubmitSuggestion={submitSuggestion}
+            onSave={(newData, entry) =>
+              logAndSave(
+                newData,
+                entry,
+                entry?.actionType?.startsWith('SUGGESTION_') &&
+                  entry.actionType !== ACTION_TYPES.SUGGESTION_CREATED
+                  ? SNAPSHOT_TRIGGERS.SUGGESTION_STATUS_CHANGED
+                  : null,
+              )
+            }
+            onLog={suggestionLogHandlers}
+          />
 
           {canManageAdmins && (
             <section className="dashboard-card dashboard-card--wide dashboard-card--owner">
@@ -1212,44 +1296,17 @@ export default function AdminDashboard() {
         <div className="modal-overlay" onClick={() => setPlayerModal(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
             <div className="modal__header">
-              <h3>{playerModal.mode === 'add' ? 'Add Player' : 'Edit Player'}</h3>
+              <h3>Edit Rank — {playerModal.playerName}</h3>
               <button type="button" className="modal__close" onClick={() => setPlayerModal(null)} aria-label="Close">
                 <X size={18} />
               </button>
             </div>
             <form onSubmit={handleSavePlayer}>
-              <div className="modal__field">
-                <label htmlFor="player-name">Player name</label>
-                <input
-                  id="player-name"
-                  type="text"
-                  placeholder="Enter player name"
-                  value={playerModal.name}
-                  onChange={(e) =>
-                    setPlayerModal((prev) => ({ ...prev, name: e.target.value }))
-                  }
-                  autoFocus
-                />
-              </div>
+              <p className="modal__hint">
+                Player names are managed in the global SMP Player List.
+              </p>
 
-              {playerModal.mode === 'add' && (
-                <div className="modal__field">
-                  <label htmlFor="player-tier-add">Tier</label>
-                  <select
-                    id="player-tier-add"
-                    value={playerModal.manualTier}
-                    onChange={(e) => setPlayerManualTier(e.target.value)}
-                  >
-                    {TIERS.map((tier) => (
-                      <option key={tier} value={tier}>
-                        {tier} ({activePointSystem[tier]} pts)
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {playerModal.mode === 'edit' && activeTierlist?.autoTierAssignment && (
+              {activeTierlist?.autoTierAssignment && (
                 <>
                   <div className="modal__field">
                     <span className="modal__label">Tier mode</span>
@@ -1288,14 +1345,11 @@ export default function AdminDashboard() {
                         >
                           {playerModal.previewAutoTier}
                         </span>
-                        <span className="modal__hint">
-                          Based on rank #{playerModal.mode === 'add' ? activeTierlist.players.length + 1 : '…'}
-                        </span>
                       </div>
                     </div>
                   ) : (
                     <div className="modal__field">
-                      <label htmlFor="player-manual-tier">Manual tier</label>
+                      <label htmlFor="player-manual-tier">Tier</label>
                       <select
                         id="player-manual-tier"
                         value={playerModal.manualTier}
@@ -1312,7 +1366,7 @@ export default function AdminDashboard() {
                 </>
               )}
 
-              {playerModal.mode === 'edit' && !activeTierlist?.autoTierAssignment && (
+              {!activeTierlist?.autoTierAssignment && (
                 <div className="modal__field">
                   <label htmlFor="player-manual-tier-only">Tier</label>
                   <select
@@ -1358,29 +1412,13 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {!isGuest && deleteTarget && (
-        <div className="modal-overlay" onClick={() => setDeleteTarget(null)}>
-          <div className="modal modal--sm" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-            <div className="modal__header">
-              <h3>Delete Player</h3>
-              <button type="button" className="modal__close" onClick={() => setDeleteTarget(null)} aria-label="Close">
-                <X size={18} />
-              </button>
-            </div>
-            <p className="modal__text">
-              Remove <strong>{deleteTarget.name}</strong> from{' '}
-              <strong>{activeTierlist?.name}</strong>? This cannot be undone.
-            </p>
-            <div className="modal__actions">
-              <button type="button" className="modal-btn modal-btn--ghost" onClick={() => setDeleteTarget(null)}>
-                Cancel
-              </button>
-              <button type="button" className="modal-btn modal-btn--danger" onClick={handleDeletePlayer}>
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
+      {isOwner && showSnapshots && (
+        <SnapshotsModal
+          data={data}
+          user={user}
+          onClose={() => setShowSnapshots(false)}
+          onRestore={handleRestoreSnapshot}
+        />
       )}
 
       {!isGuest && showLogs && (
