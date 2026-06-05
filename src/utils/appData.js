@@ -12,8 +12,6 @@ import {
 } from './adminStorage'
 import { migrateLegacyToGlobalPlayers, syncTierlistsWithSmpPlayers } from './playerSync'
 import { normalizeSmpPlayers } from './smpPlayers'
-import { normalizeSuggestions } from './suggestions'
-
 export { getManagedAdmins, normalizeManagedAdmins, isOwnerRecord }
 
 function createDefaultTierlist() {
@@ -37,7 +35,6 @@ export function createDefaultAppData() {
     version: DATA_VERSION,
     tierlists: [createDefaultTierlist()],
     smpPlayers: [],
-    suggestions: [],
     admins: [],
     logs: [],
     settings: {},
@@ -56,7 +53,6 @@ export function prepareAppData(raw) {
     logs: Array.isArray(raw?.logs) ? raw.logs : [],
     tierlists,
     smpPlayers: normalizeSmpPlayers(raw?.smpPlayers),
-    suggestions: normalizeSuggestions(raw?.suggestions),
     admins: normalizeManagedAdmins(raw?.admins),
   }
 

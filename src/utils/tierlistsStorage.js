@@ -314,14 +314,12 @@ function persist(data) {
     settings: data.settings ?? {},
     logs: Array.isArray(data.logs) ? data.logs : [],
     smpPlayers: data.smpPlayers ?? [],
-    suggestions: data.suggestions ?? [],
     tierlists: data.tierlists ?? [],
   })
   return {
     ...calculated,
     admins: data.admins ?? [],
     smpPlayers: data.smpPlayers ?? [],
-    suggestions: data.suggestions ?? [],
   }
 }
 
@@ -330,6 +328,19 @@ function rejectOverallMutation(tierlistId) {
     return { success: false, error: 'Overall is auto-calculated and cannot be edited manually.' }
   }
   return null
+}
+
+function findTierlistPlayerIndex(tierlist, playerId) {
+  const players = tierlist.players ?? []
+  const byId = players.findIndex((player) => player.id === playerId)
+  if (byId !== -1) return byId
+
+  return players.findIndex(
+    (player) =>
+      player.smpPlayerId === playerId ||
+      player.id === `entry-${playerId}` ||
+      (player.smpPlayerId && `entry-${player.smpPlayerId}` === playerId),
+  )
 }
 
 export function createTierlist(data, name) {
@@ -462,7 +473,7 @@ export function updateTierlistPlayerRank(data, tierlistId, playerId, payload) {
     return { success: false, error: 'Tierlist not found.' }
   }
 
-  const index = tierlist.players.findIndex((p) => p.id === playerId)
+  const index = findTierlistPlayerIndex(tierlist, playerId)
   if (index === -1) {
     return { success: false, error: 'Player not found.' }
   }
@@ -504,7 +515,7 @@ export function movePlayer(data, tierlistId, playerId, direction) {
     return { success: false, error: 'Tierlist not found.' }
   }
 
-  const index = tierlist.players.findIndex((p) => p.id === playerId)
+  const index = findTierlistPlayerIndex(tierlist, playerId)
   if (index === -1) {
     return { success: false, error: 'Player not found.' }
   }

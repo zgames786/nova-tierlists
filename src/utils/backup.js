@@ -7,13 +7,13 @@ import { DATA_VERSION, getPointSystem, isOverallTierlist } from './tierlistsStor
 export const BACKUP_FILENAME = 'novasmp-tierlists-backup.json'
 export const PUBLIC_RANKINGS_FILENAME = 'novasmp-public-rankings.json'
 
-export function buildBackupPayload(data, session = null) {
+export function buildBackupPayload(data, session = null, suggestions = []) {
   return {
     version: DATA_VERSION,
     exportedAt: new Date().toISOString(),
     tierlists: data.tierlists ?? [],
     smpPlayers: data.smpPlayers ?? [],
-    suggestions: data.suggestions ?? [],
+    suggestions,
     admins: getManagedAdmins(data),
     logs: data.logs ?? [],
     settings: data.settings ?? {},
@@ -107,7 +107,6 @@ export function buildImportedAppData(payload) {
     version: DATA_VERSION,
     tierlists: payload.tierlists,
     smpPlayers: payload.smpPlayers ?? [],
-    suggestions: payload.suggestions ?? [],
     logs: payload.logs ?? [],
     settings: payload.settings ?? {},
     admins: payload.admins ?? [],

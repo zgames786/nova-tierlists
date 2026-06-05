@@ -76,31 +76,50 @@ export function migrateLegacyToGlobalPlayers(data) {
   return { ...data, smpPlayers, tierlists }
 }
 
+function resolveSmpPlayerId(player) {
+  if (player.smpPlayerId) return player.smpPlayerId
+  if (player.id?.startsWith('entry-')) return player.id.slice('entry-'.length)
+  return player.id ?? null
+}
+
 export function syncTierlistsWithSmpPlayers(data) {
   const smpPlayers = getActiveSmpPlayers(data)
+  const smpById = new Map(smpPlayers.map((smp) => [smp.id, smp]))
+  const smpByName = new Map(smpPlayers.map((smp) => [smp.name.toLowerCase(), smp]))
 
   const tierlists = (data.tierlists ?? []).map((tierlist) => {
     if (isOverallTierlist(tierlist)) {
       return { ...tierlist, players: [] }
     }
 
-    const existingBySmpId = new Map()
+    const players = []
+    const seenSmpIds = new Set()
+
     for (const player of tierlist.players ?? []) {
-      const key = player.smpPlayerId ?? player.id
-      existingBySmpId.set(key, player)
+      let smpId = resolveSmpPlayerId(player)
+      let smp = smpId ? smpById.get(smpId) : null
+
+      if (!smp && player.name) {
+        smp = smpByName.get(player.name.trim().toLowerCase())
+        if (smp) smpId = smp.id
+      }
+
+      if (!smp) continue
+
+      seenSmpIds.add(smp.id)
+      players.push({
+        ...player,
+        id: player.id ?? `entry-${smp.id}`,
+        smpPlayerId: smp.id,
+        name: smp.name,
+      })
     }
 
-    const players = smpPlayers.map((smp) => {
-      const existing = existingBySmpId.get(smp.id)
-      if (existing) {
-        return {
-          ...existing,
-          smpPlayerId: smp.id,
-          name: smp.name,
-        }
+    for (const smp of smpPlayers) {
+      if (!seenSmpIds.has(smp.id)) {
+        players.push(createDefaultTierlistEntry(smp))
       }
-      return createDefaultTierlistEntry(smp)
-    })
+    }
 
     return { ...tierlist, players }
   })

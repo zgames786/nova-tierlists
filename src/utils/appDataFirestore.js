@@ -1,7 +1,6 @@
 import { doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore'
 import { db } from '../firebase'
 import { createDefaultAppData, prepareAppData } from './appData'
-import { appendLog } from './activityLog'
 
 export const APP_DATA_COLLECTION = 'appData'
 export const APP_DATA_DOC_ID = 'novaSmp'
@@ -9,7 +8,9 @@ export const APP_DATA_DOC_ID = 'novaSmp'
 const appDataRef = doc(db, APP_DATA_COLLECTION, APP_DATA_DOC_ID)
 
 function serializeForFirestore(data) {
-  return JSON.parse(JSON.stringify(prepareAppData(data)))
+  const prepared = prepareAppData(data)
+  const { suggestions: _legacySuggestions, ...withoutSuggestions } = prepared
+  return JSON.parse(JSON.stringify(withoutSuggestions))
 }
 
 /** Read app data only — never writes (safe for guests and pre-login). */
@@ -27,18 +28,6 @@ export async function saveAppData(data) {
   const prepared = serializeForFirestore(data)
   await setDoc(appDataRef, prepared)
   return prepared
-}
-
-export async function appendSuggestionToFirestore(suggestion, logEntry = null) {
-  const current = await loadAppData()
-  let next = {
-    ...current,
-    suggestions: [suggestion, ...(current.suggestions ?? [])],
-  }
-  if (logEntry) {
-    next = appendLog(next, logEntry)
-  }
-  return saveAppData(next)
 }
 
 export function subscribeAppData(onData, onError) {

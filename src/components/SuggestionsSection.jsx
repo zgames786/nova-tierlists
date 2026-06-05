@@ -5,21 +5,19 @@ import {
   SUGGESTION_STATUSES,
   SUGGESTION_TYPES,
   createSuggestionPayload,
-  deleteSuggestion,
   getSuggestionTypeLabel,
-  updateSuggestionStatus,
 } from '../utils/suggestions'
 
 export default function SuggestionsSection({
-  data,
+  suggestions = [],
   user,
   isGuest,
   canManageSuggestions,
-  tierlists,
-  smpPlayers,
   onSubmitSuggestion,
-  onSave,
+  onUpdateSuggestionStatus,
+  onDeleteSuggestion,
   onLog,
+  onAppendLog,
 }) {
   const [form, setForm] = useState({
     type: 'general',
@@ -30,10 +28,6 @@ export default function SuggestionsSection({
   })
   const [submitMessage, setSubmitMessage] = useState({ type: '', text: '' })
   const [deleteTarget, setDeleteTarget] = useState(null)
-
-  const suggestions = data.suggestions ?? []
-  const tierlistNames = tierlists.filter((t) => !t.isCalculated).map((t) => t.name)
-  const playerNames = smpPlayers.map((p) => p.name)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -55,12 +49,7 @@ export default function SuggestionsSection({
     })
 
     try {
-      if (isGuest) {
-        await onSubmitSuggestion(suggestion, onLog?.suggestionCreated?.(suggestion))
-      } else {
-        const next = { ...data, suggestions: [suggestion, ...(data.suggestions ?? [])] }
-        await onSave(next, onLog?.suggestionCreated?.(suggestion))
-      }
+      await onSubmitSuggestion(suggestion, onLog?.suggestionCreated?.(suggestion))
       setForm({
         type: 'general',
         playerName: '',
@@ -75,23 +64,34 @@ export default function SuggestionsSection({
   }
 
   const handleStatusChange = async (suggestion, status) => {
-    const result = updateSuggestionStatus(data, suggestion.id, status)
-    if (!result.success) return
-
-    const actionMap = {
-      reviewed: onLog?.suggestionReviewed,
-      approved: onLog?.suggestionApproved,
-      rejected: onLog?.suggestionRejected,
+    try {
+      const result = await onUpdateSuggestionStatus(suggestion.id, status)
+      const actionMap = {
+        reviewed: onLog?.suggestionReviewed,
+        approved: onLog?.suggestionApproved,
+        rejected: onLog?.suggestionRejected,
+      }
+      const logEntry = actionMap[status]?.(result.suggestion, result.previousStatus)
+      if (logEntry) {
+        await onAppendLog(logEntry)
+      }
+    } catch {
+      /* subscription will reflect current state */
     }
-    await onSave(result.data, actionMap[status]?.(result.suggestion, result.previousStatus))
   }
 
   const handleDelete = async () => {
     if (!deleteTarget) return
-    const result = deleteSuggestion(data, deleteTarget.id)
-    if (result.success) {
-      await onSave(result.data, onLog?.suggestionDeleted?.(result.removed))
+
+    try {
+      const removed = await onDeleteSuggestion(deleteTarget.id)
+      const logEntry = onLog?.suggestionDeleted?.(removed)
+      if (logEntry) {
+        await onAppendLog(logEntry)
+      }
       setDeleteTarget(null)
+    } catch {
+      /* subscription will reflect current state */
     }
   }
 
@@ -110,7 +110,7 @@ export default function SuggestionsSection({
           </div>
         </div>
 
-        <form className="suggestion-form" onSubmit={handleSubmit}>
+        <form className="suggestion-form" onSubmit={handleSubmit} autoComplete="off">
           {submitMessage.text && (
             <div
               className={`dashboard-message dashboard-message--${submitMessage.type}`}
@@ -140,8 +140,9 @@ export default function SuggestionsSection({
               <label htmlFor="sug-player">Your player name</label>
               <input
                 id="sug-player"
+                name="sug-player-name"
                 type="text"
-                list="smp-player-names"
+                autoComplete="off"
                 value={form.playerName}
                 onChange={(e) => setForm((prev) => ({ ...prev, playerName: e.target.value }))}
                 placeholder="Optional"
@@ -152,8 +153,9 @@ export default function SuggestionsSection({
               <label htmlFor="sug-target">Target player</label>
               <input
                 id="sug-target"
+                name="sug-target-player"
                 type="text"
-                list="smp-player-names"
+                autoComplete="off"
                 value={form.targetPlayerName}
                 onChange={(e) => setForm((prev) => ({ ...prev, targetPlayerName: e.target.value }))}
                 placeholder="Optional"
@@ -164,8 +166,9 @@ export default function SuggestionsSection({
               <label htmlFor="sug-tierlist">Tierlist</label>
               <input
                 id="sug-tierlist"
+                name="sug-tierlist-name"
                 type="text"
-                list="tierlist-names"
+                autoComplete="off"
                 value={form.tierlistName}
                 onChange={(e) => setForm((prev) => ({ ...prev, tierlistName: e.target.value }))}
                 placeholder="Optional"
@@ -173,22 +176,13 @@ export default function SuggestionsSection({
             </div>
           </div>
 
-          <datalist id="smp-player-names">
-            {playerNames.map((name) => (
-              <option key={name} value={name} />
-            ))}
-          </datalist>
-          <datalist id="tierlist-names">
-            {tierlistNames.map((name) => (
-              <option key={name} value={name} />
-            ))}
-          </datalist>
-
           <div className="modal__field">
             <label htmlFor="sug-message">Message</label>
             <textarea
               id="sug-message"
+              name="sug-message"
               rows={3}
+              autoComplete="off"
               value={form.message}
               onChange={(e) => setForm((prev) => ({ ...prev, message: e.target.value }))}
               placeholder="Describe your suggestion..."

@@ -73,7 +73,18 @@ import './AdminDashboard.css'
 export default function AdminDashboard() {
   const navigate = useNavigate()
   const { user, logout, exitGuest, isGuest, canManageAdmins, isOwner } = useAuth()
-  const { data, saveAppData, submitSuggestion, saving, error: dataError } = useAppData()
+  const {
+    data,
+    suggestions,
+    saveAppData,
+    submitSuggestion,
+    updateSuggestionStatus,
+    deleteSuggestion,
+    importSuggestions,
+    appendAppLog,
+    saving,
+    error: dataError,
+  } = useAppData()
   const importInputRef = useRef(null)
 
   const [activeId, setActiveId] = useState('overall')
@@ -109,11 +120,17 @@ export default function AdminDashboard() {
   const isOverallViewEarly = activeTierlist ? isOverallTierlist(activeTierlist) : false
   const rankedPlayerRows = useMemo(() => {
     if (!activeTierlist?.players?.length) return []
-    return buildRankedPlayerRows(
-      activeTierlist.players,
-      (player) => resolvePlayerDisplay(player, activeTierlist).points,
-      { competition: isOverallViewEarly },
-    )
+    if (isOverallViewEarly) {
+      return buildRankedPlayerRows(
+        activeTierlist.players,
+        (player) => resolvePlayerDisplay(player, activeTierlist).points,
+        { competition: true },
+      )
+    }
+    return activeTierlist.players.map((player, index) => ({
+      player,
+      displayRank: index + 1,
+    }))
   }, [activeTierlist, isOverallViewEarly])
 
   if (!data) {
@@ -177,7 +194,7 @@ export default function AdminDashboard() {
       return
     }
 
-    const payload = buildBackupPayload(data, user)
+    const payload = buildBackupPayload(data, user, suggestions)
     downloadBackupJson(payload)
     try {
       await logAndSave(
@@ -230,6 +247,9 @@ export default function AdminDashboard() {
         }),
         SNAPSHOT_TRIGGERS.IMPORT_DATA,
       )
+      if (payload.suggestions?.length) {
+        await importSuggestions(payload.suggestions)
+      }
       if (saved.tierlists.some((t) => t.id === activeId)) {
         setActiveId(activeId)
       } else {
@@ -852,11 +872,8 @@ export default function AdminDashboard() {
                 </div>
               )}
 
-              {rankedPlayerRows.map(({ player, displayRank }) => {
+              {rankedPlayerRows.map(({ player, displayRank }, rowIndex) => {
                 const display = resolvePlayerDisplay(player, activeTierlist)
-                const storageIndex = activeTierlist.players.findIndex(
-                  (entry) => entry.id === player.id,
-                )
                 return (
                   <div
                     key={player.id}
@@ -896,7 +913,7 @@ export default function AdminDashboard() {
                           type="button"
                           className="action-btn"
                           title="Edit rank"
-                          onClick={() => openEditPlayer(player, storageIndex)}
+                          onClick={() => openEditPlayer(player, rowIndex)}
                         >
                           <Pencil size={14} />
                         </button>
@@ -904,7 +921,7 @@ export default function AdminDashboard() {
                           type="button"
                           className="action-btn"
                           title="Move up"
-                          disabled={storageIndex <= 0}
+                          disabled={rowIndex <= 0}
                           onClick={() => handleMove(player.id, 'up')}
                         >
                           <ChevronUp size={14} />
@@ -913,7 +930,7 @@ export default function AdminDashboard() {
                           type="button"
                           className="action-btn"
                           title="Move down"
-                          disabled={storageIndex >= activeTierlist.players.length - 1}
+                          disabled={rowIndex >= activeTierlist.players.length - 1}
                           onClick={() => handleMove(player.id, 'down')}
                         >
                           <ChevronDown size={14} />
@@ -976,23 +993,14 @@ export default function AdminDashboard() {
           />
 
           <SuggestionsSection
-            data={data}
+            suggestions={suggestions}
             user={user}
             isGuest={isGuest}
             canManageSuggestions={!isGuest}
-            tierlists={data.tierlists}
-            smpPlayers={(data.smpPlayers ?? []).filter((p) => p.status === 'active')}
             onSubmitSuggestion={submitSuggestion}
-            onSave={(newData, entry) =>
-              logAndSave(
-                newData,
-                entry,
-                entry?.actionType?.startsWith('SUGGESTION_') &&
-                  entry.actionType !== ACTION_TYPES.SUGGESTION_CREATED
-                  ? SNAPSHOT_TRIGGERS.SUGGESTION_STATUS_CHANGED
-                  : null,
-              )
-            }
+            onUpdateSuggestionStatus={updateSuggestionStatus}
+            onDeleteSuggestion={deleteSuggestion}
+            onAppendLog={appendAppLog}
             onLog={suggestionLogHandlers}
           />
 
