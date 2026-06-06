@@ -10,8 +10,7 @@ import {
   updateDoc,
 } from 'firebase/firestore'
 import { db } from '../firebase'
-import { APP_DATA_COLLECTION, APP_DATA_DOC_ID } from './appDataFirestore'
-import { prepareAppData } from './appData'
+import { APP_DATA_COLLECTION, APP_DATA_DOC_ID, serializeAppDataDoc } from './appDataFirestore'
 import { normalizeSuggestions } from './suggestions'
 
 export const SUGGESTIONS_COLLECTION = 'suggestions'
@@ -60,7 +59,7 @@ export async function importSuggestionsToFirestore(suggestions = []) {
   return normalized
 }
 
-/** Move legacy appData.suggestions into the suggestions collection and clear appData. */
+/** @deprecated Use migrateAppDataToCollections */
 export async function migrateLegacySuggestionsFromAppData() {
   const appDataRef = doc(db, APP_DATA_COLLECTION, APP_DATA_DOC_ID)
   const snapshot = await getDoc(appDataRef)
@@ -76,10 +75,7 @@ export async function migrateLegacySuggestionsFromAppData() {
   }
 
   await importSuggestionsToFirestore(legacy)
-
-  const { suggestions: _removed, ...withoutSuggestions } = raw
-  const prepared = prepareAppData(withoutSuggestions)
-  await setDoc(appDataRef, JSON.parse(JSON.stringify(prepared)))
+  await setDoc(appDataRef, serializeAppDataDoc(raw))
 
   return { migrated: legacy.length }
 }

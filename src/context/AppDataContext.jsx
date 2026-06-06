@@ -1,18 +1,29 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from './AuthContext'
 import { appendLog } from '../utils/activityLog'
-import { prepareAppData } from '../utils/appData'
+import { mergeAppDataSources, prepareAppData } from '../utils/appData'
 import {
   loadAppData,
   saveAppData as saveAppDataToFirestore,
-  subscribeAppData,
+  subscribeAppDataCore,
 } from '../utils/appDataFirestore'
 import { canWriteFirestore, isAdminUser, isGuest } from '../utils/adminAuth'
+import {
+  appendLogToFirestore,
+  clearLogsInFirestore,
+  subscribeLogs,
+  syncLogsToFirestore,
+} from '../utils/logsFirestore'
+import { migrateAppDataToCollections } from '../utils/migrateAppDataFirestore'
+import {
+  deletePlayerFromFirestore,
+  savePlayerToFirestore,
+  subscribePlayers,
+} from '../utils/playersFirestore'
 import {
   createSuggestionInFirestore,
   deleteSuggestionFromFirestore,
   importSuggestionsToFirestore,
-  migrateLegacySuggestionsFromAppData,
   subscribeSuggestions,
   updateSuggestionStatusInFirestore,
 } from '../utils/suggestionsFirestore'
@@ -20,9 +31,48 @@ import { SUGGESTION_STATUSES } from '../utils/suggestions'
 
 const AppDataContext = createContext(null)
 
+function diffPlayers(previous = [], next = []) {
+  const previousMap = new Map(previous.map((player) => [player.id, player]))
+  const nextMap = new Map(next.map((player) => [player.id, player]))
+  const upsert = []
+  const remove = []
+
+  for (const [id, player] of nextMap) {
+    const existing = previousMap.get(id)
+    if (!existing || JSON.stringify(existing) !== JSON.stringify(player)) {
+      upsert.push(player)
+    }
+  }
+
+  for (const [id] of previousMap) {
+    if (!nextMap.has(id)) {
+      remove.push(id)
+    }
+  }
+
+  return { upsert, remove }
+}
+
+function diffLogs(previous = [], next = []) {
+  const writes = []
+  const nextIds = new Set(next.map((log) => log.id))
+
+  for (const log of next) {
+    const existing = previous.find((entry) => entry.id === log.id)
+    if (!existing || JSON.stringify(existing) !== JSON.stringify(log)) {
+      writes.push(log)
+    }
+  }
+
+  const deletes = previous.filter((log) => !nextIds.has(log.id)).map((log) => log.id)
+  return { writes, deletes }
+}
+
 export function AppDataProvider({ children }) {
   const { user } = useAuth()
-  const [data, setData] = useState(null)
+  const [coreData, setCoreData] = useState(null)
+  const [smpPlayers, setSmpPlayers] = useState(null)
+  const [logs, setLogs] = useState(null)
   const [suggestions, setSuggestions] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -32,45 +82,115 @@ export function AppDataProvider({ children }) {
   const pendingSavesRef = useRef(0)
   const saveGenerationRef = useRef(0)
   const writeQueueRef = useRef(Promise.resolve())
+  const coreRef = useRef(null)
+  const playersRef = useRef(null)
+  const logsRef = useRef(null)
 
   const isAdmin = isAdminUser(user)
+
+  const data = useMemo(() => {
+    if (!coreData || smpPlayers === null || logs === null) {
+      return null
+    }
+    return mergeAppDataSources(coreData, smpPlayers, logs)
+  }, [coreData, smpPlayers, logs])
 
   useEffect(() => {
     dataRef.current = data
   }, [data])
 
-  useEffect(() => {
-    setLoading(true)
+  const mergeAndSet = useCallback(() => {
+    if (!coreRef.current || playersRef.current === null || logsRef.current === null) {
+      return
+    }
+    setCoreData(coreRef.current)
+    setSmpPlayers(playersRef.current)
+    setLogs(logsRef.current)
+    setLoading(false)
     setError(null)
-
-    const unsubscribe = subscribeAppData(
-      (appData) => {
-        if (pendingSavesRef.current > 0) {
-          return
-        }
-        dataRef.current = appData
-        setData(appData)
-        setLoading(false)
-        setError(null)
-      },
-      (loadError) => {
-        setError(loadError?.message ?? 'Failed to load NovaSMP data from Firestore.')
-        setLoading(false)
-      },
-    )
-
-    return unsubscribe
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    let unsubCore = () => {}
+    let unsubPlayers = () => {}
+    let unsubLogs = () => {}
+
+    const setup = async () => {
+      setLoading(true)
+      setError(null)
+
+      if (isAdmin && !migrationAttempted.current) {
+        migrationAttempted.current = true
+        try {
+          await migrateAppDataToCollections()
+        } catch (migrationError) {
+          console.warn('App data migration failed:', migrationError)
+          setError(
+            migrationError?.message ??
+              'Failed to migrate app data out of the oversized document. Sign in as admin and reload.',
+          )
+        }
+      }
+
+      if (cancelled) return
+
+      unsubCore = subscribeAppDataCore(
+        (core) => {
+          if (pendingSavesRef.current > 0) return
+          coreRef.current = core
+          mergeAndSet()
+        },
+        (loadError) => {
+          setError(loadError?.message ?? 'Failed to load NovaSMP data from Firestore.')
+          setLoading(false)
+        },
+      )
+
+      unsubPlayers = subscribePlayers(
+        (players) => {
+          if (pendingSavesRef.current > 0) return
+          playersRef.current = players
+          mergeAndSet()
+        },
+        (loadError) => {
+          setError(loadError?.message ?? 'Failed to load players from Firestore.')
+          setLoading(false)
+        },
+      )
+
+      if (isAdmin) {
+        unsubLogs = subscribeLogs(
+          (entries) => {
+            if (pendingSavesRef.current > 0) return
+            logsRef.current = entries
+            mergeAndSet()
+          },
+          (loadError) => {
+            setError(loadError?.message ?? 'Failed to load activity logs from Firestore.')
+            setLoading(false)
+          },
+        )
+      } else {
+        logsRef.current = []
+        mergeAndSet()
+      }
+    }
+
+    setup()
+
+    return () => {
+      cancelled = true
+      unsubCore()
+      unsubPlayers()
+      unsubLogs()
+    }
+  }, [isAdmin, mergeAndSet])
 
   useEffect(() => {
     if (!isAdmin) {
       setSuggestions([])
       return undefined
-    }
-
-    if (!migrationAttempted.current) {
-      migrationAttempted.current = true
-      migrateLegacySuggestionsFromAppData().catch(() => {})
     }
 
     const unsubscribe = subscribeSuggestions(
@@ -83,40 +203,64 @@ export function AppDataProvider({ children }) {
     return unsubscribe
   }, [isAdmin])
 
-  const saveAppData = useCallback(
-    (newData) => {
-      const prepared = prepareAppData(newData)
-
-      if (isGuest(user)) {
-        dataRef.current = prepared
-        setData(prepared)
-        return Promise.resolve(prepared)
-      }
-
-      if (!canWriteFirestore(user)) {
-        return Promise.reject(new Error('You must be signed in with Firebase Auth to save changes.'))
-      }
-
+  const persistPreparedData = useCallback(
+    (prepared, previousData) => {
       const saveId = ++saveGenerationRef.current
-      const rollbackData = dataRef.current
+      const rollbackData = previousData
       pendingSavesRef.current += 1
 
       setSaving(true)
       setError(null)
-      dataRef.current = prepared
-      setData(prepared)
+
+      const { upsert: playersToUpsert, remove: playersToRemove } = diffPlayers(
+        previousData?.smpPlayers ?? [],
+        prepared.smpPlayers ?? [],
+      )
+      const { writes: logsToWrite, deletes: logsToDelete } = diffLogs(
+        previousData?.logs ?? [],
+        prepared.logs ?? [],
+      )
+
+      coreRef.current = {
+        version: prepared.version,
+        settings: prepared.settings,
+        admins: prepared.admins,
+        tierlists: prepared.tierlists,
+      }
+      playersRef.current = prepared.smpPlayers ?? []
+      logsRef.current = prepared.logs ?? []
+      setCoreData(coreRef.current)
+      setSmpPlayers(playersRef.current)
+      setLogs(logsRef.current)
 
       writeQueueRef.current = writeQueueRef.current.then(async () => {
         try {
-          const saved = await saveAppDataToFirestore(prepared)
-          if (saveId === saveGenerationRef.current) {
-            dataRef.current = saved
-            setData(saved)
+          await saveAppDataToFirestore(prepared)
+          await Promise.all([
+            ...playersToUpsert.map((player) => savePlayerToFirestore(player)),
+            ...playersToRemove.map((playerId) => deletePlayerFromFirestore(playerId)),
+            ...logsToWrite.map((entry) => appendLogToFirestore(entry)),
+          ])
+
+          if (logsToDelete.length > 0) {
+            await clearLogsInFirestore()
+            if ((prepared.logs ?? []).length > 0) {
+              await syncLogsToFirestore(prepared.logs)
+            }
           }
         } catch (saveError) {
-          if (saveId === saveGenerationRef.current) {
-            dataRef.current = rollbackData
-            setData(rollbackData)
+          if (saveId === saveGenerationRef.current && rollbackData) {
+            coreRef.current = {
+              version: rollbackData.version,
+              settings: rollbackData.settings,
+              admins: rollbackData.admins,
+              tierlists: rollbackData.tierlists,
+            }
+            playersRef.current = rollbackData.smpPlayers ?? []
+            logsRef.current = rollbackData.logs ?? []
+            setCoreData(coreRef.current)
+            setSmpPlayers(playersRef.current)
+            setLogs(logsRef.current)
           }
           setError(saveError?.message ?? 'Failed to save to Firestore.')
         } finally {
@@ -130,7 +274,35 @@ export function AppDataProvider({ children }) {
 
       return Promise.resolve(prepared)
     },
-    [user],
+    [],
+  )
+
+  const saveAppData = useCallback(
+    (newData) => {
+      const prepared = prepareAppData(newData)
+
+      if (isGuest(user)) {
+        coreRef.current = {
+          version: prepared.version,
+          settings: prepared.settings,
+          admins: prepared.admins,
+          tierlists: prepared.tierlists,
+        }
+        playersRef.current = prepared.smpPlayers ?? []
+        logsRef.current = prepared.logs ?? []
+        setCoreData(coreRef.current)
+        setSmpPlayers(playersRef.current)
+        setLogs(logsRef.current)
+        return Promise.resolve(prepared)
+      }
+
+      if (!canWriteFirestore(user)) {
+        return Promise.reject(new Error('You must be signed in with Firebase Auth to save changes.'))
+      }
+
+      return persistPreparedData(prepared, dataRef.current)
+    },
+    [user, persistPreparedData],
   )
 
   const appendAppLog = useCallback(
@@ -138,7 +310,9 @@ export function AppDataProvider({ children }) {
       if (!logEntry || isGuest(user) || !dataRef.current) {
         return Promise.resolve(dataRef.current)
       }
-      return saveAppData(appendLog(dataRef.current, logEntry))
+
+      const withLog = appendLog(dataRef.current, logEntry)
+      return saveAppData(withLog)
     },
     [user, saveAppData],
   )
@@ -247,8 +421,17 @@ export function AppDataProvider({ children }) {
     setError(null)
     try {
       const loaded = await loadAppData()
-      dataRef.current = loaded
-      setData(loaded)
+      coreRef.current = {
+        version: loaded.version,
+        settings: loaded.settings,
+        admins: loaded.admins,
+        tierlists: loaded.tierlists,
+      }
+      playersRef.current = loaded.smpPlayers ?? []
+      logsRef.current = loaded.logs ?? []
+      setCoreData(coreRef.current)
+      setSmpPlayers(playersRef.current)
+      setLogs(logsRef.current)
       return loaded
     } catch (loadError) {
       setError(loadError?.message ?? 'Failed to load NovaSMP data from Firestore.')
@@ -272,7 +455,7 @@ export function AppDataProvider({ children }) {
       importSuggestions,
       appendAppLog,
       refreshAppData,
-      setData,
+      setData: saveAppData,
     }),
     [
       data,

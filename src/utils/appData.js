@@ -34,11 +34,20 @@ export function createDefaultAppData() {
   return {
     version: DATA_VERSION,
     tierlists: [createDefaultTierlist()],
-    smpPlayers: [],
     admins: [],
-    logs: [],
     settings: {},
   }
+}
+
+export function mergeAppDataSources(core, smpPlayers = [], logs = []) {
+  return prepareAppData({
+    version: core?.version ?? DATA_VERSION,
+    settings: core?.settings ?? {},
+    admins: core?.admins ?? [],
+    tierlists: core?.tierlists ?? [],
+    smpPlayers,
+    logs,
+  })
 }
 
 export function prepareAppData(raw) {
