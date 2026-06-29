@@ -15,6 +15,7 @@ import {
   login as authLogin,
   logout as authLogout,
 } from '../utils/adminAuth'
+import { recordLoginActivity } from '../utils/loginActivity'
 
 const AuthContext = createContext(null)
 
@@ -42,6 +43,11 @@ export function AuthProvider({ children }) {
     const result = await authLogin(username, password)
     if (result.success) {
       setUser(result.user)
+      try {
+        await recordLoginActivity(result.user)
+      } catch (logError) {
+        console.error('Failed to record admin login log:', logError)
+      }
     }
     return result
   }, [])

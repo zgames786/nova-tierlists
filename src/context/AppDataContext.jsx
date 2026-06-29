@@ -14,6 +14,7 @@ import {
   subscribeLogs,
   syncLogsToFirestore,
 } from '../utils/logsFirestore'
+import { setLoginLogSink } from '../utils/loginActivity'
 import { migrateAppDataToCollections } from '../utils/migrateAppDataFirestore'
 import {
   deletePlayerFromFirestore,
@@ -98,6 +99,23 @@ export function AppDataProvider({ children }) {
   useEffect(() => {
     dataRef.current = data
   }, [data])
+
+  useEffect(() => {
+    setLoginLogSink(async (entry) => {
+      pendingSavesRef.current += 1
+      try {
+        const updatedLogs = [entry, ...(logsRef.current ?? [])]
+        logsRef.current = updatedLogs
+        setLogs(updatedLogs)
+        await appendLogToFirestore(entry)
+        return entry
+      } finally {
+        pendingSavesRef.current = Math.max(0, pendingSavesRef.current - 1)
+      }
+    })
+
+    return () => setLoginLogSink(null)
+  }, [])
 
   const mergeAndSet = useCallback(() => {
     if (!coreRef.current || playersRef.current === null || logsRef.current === null) {
