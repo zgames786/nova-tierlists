@@ -2,12 +2,12 @@ import { useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAppData } from '../context/AppDataContext'
 import { useAuth } from '../context/AuthContext'
-import { ACTION_TYPES, appendLog, createLogEntry } from '../utils/activityLog'
+import { ACTION_TYPES, createLogEntry } from '../utils/activityLog'
 import './AdminLogin.css'
 
 export default function AdminLogin() {
   const navigate = useNavigate()
-  const { data, saveAppData } = useAppData()
+  const { appendAppLog } = useAppData()
   const { login, isAuthenticated, isGuest, authLoading } = useAuth()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -31,19 +31,18 @@ export default function AdminLogin() {
       const result = await login(username, password)
       if (result.success) {
         try {
-          if (data) {
-            const entry = createLogEntry({
-              adminUsername: result.user.username,
-              adminRole: result.user.role,
-              actionType: ACTION_TYPES.ADMIN_LOGIN,
-              targetType: 'session',
-              targetName: result.user.username,
-              details: `${result.user.username} logged in`,
-            })
-            await saveAppData(appendLog(data, entry))
-          }
+          const entry = createLogEntry({
+            adminUsername: result.user.username,
+            adminRole: result.user.role,
+            actionType: ACTION_TYPES.ADMIN_LOGIN,
+            targetType: 'session',
+            targetName: result.user.username,
+            details: `${result.user.username} logged in`,
+          })
+          await appendAppLog(entry)
           navigate('/rankings')
-        } catch {
+        } catch (logError) {
+          console.error('Failed to record admin login log:', logError)
           navigate('/rankings')
         }
       } else {

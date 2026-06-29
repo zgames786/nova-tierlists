@@ -132,11 +132,15 @@ export function isOwner(user) {
   return user?.role === ROLES.OWNER
 }
 
+export function isGuestOnlySession(user) {
+  return isGuest(user) && !auth.currentUser
+}
+
 export function canWriteFirestore(user) {
-  if (isGuest(user)) {
-    return false
+  if (auth.currentUser) {
+    return true
   }
-  return Boolean(auth.currentUser)
+  return !isGuest(user)
 }
 
 /** @deprecated Use canManageAdminAccounts */

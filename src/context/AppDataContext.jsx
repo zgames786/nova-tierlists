@@ -7,7 +7,7 @@ import {
   saveAppData as saveAppDataToFirestore,
   subscribeAppDataCore,
 } from '../utils/appDataFirestore'
-import { canWriteFirestore, isAdminUser, isGuest } from '../utils/adminAuth'
+import { canWriteFirestore, isAdminUser, isGuestOnlySession } from '../utils/adminAuth'
 import {
   appendLogToFirestore,
   clearLogsInFirestore,
@@ -281,7 +281,7 @@ export function AppDataProvider({ children }) {
     (newData) => {
       const prepared = prepareAppData(newData)
 
-      if (isGuest(user)) {
+      if (isGuestOnlySession(user)) {
         coreRef.current = {
           version: prepared.version,
           settings: prepared.settings,
@@ -307,7 +307,11 @@ export function AppDataProvider({ children }) {
 
   const appendAppLog = useCallback(
     (logEntry) => {
-      if (!logEntry || isGuest(user) || !dataRef.current) {
+      if (!logEntry || !dataRef.current) {
+        return Promise.resolve(dataRef.current)
+      }
+
+      if (isGuestOnlySession(user)) {
         return Promise.resolve(dataRef.current)
       }
 
